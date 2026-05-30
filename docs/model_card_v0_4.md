@@ -49,6 +49,14 @@ Category mix:
 
 No code tasks are included in v0.4.
 
+The v0.4.2 experimentation pass adds a local-only lite replay recipe:
+
+- Dolly-lite conversion from already downloaded Dolly raw JSONL with aggressive filtering.
+- TinyStories replay rows to preserve the base model's simple narrative behavior.
+- Source-capped mixing across everyday, Dolly-lite, Xiaomi seeded, and replay data.
+
+This is an experiment recipe, not a committed dataset or final checkpoint.
+
 ## Training Objective
 
 Supervised fine-tuning with output-only loss masking:
@@ -82,3 +90,5 @@ Use `scripts/eval_sarych.py` with `eval/prompts_v0_4.jsonl` to generate base and
 ## Limitations
 
 This remains a 30M-parameter model trained from a narrow story base. It should be expected to hallucinate, struggle with facts, fail complex instructions, and require manual review before any downstream use.
+
+Earlier v0.4 SFT attempts showed repetition and degraded language quality at longer runs. Lower learning rates and replay data are intended to reduce destructive fine-tuning, but they do not remove the fundamental capacity and data-quality limits.

@@ -33,6 +33,7 @@ data/tokenizers/*.json
 data/xiaomi/raw/**/*.jsonl
 data/xiaomi/scored/**/*.jsonl
 data/xiaomi/processed/**/*.jsonl
+data/xiaomi/processed/**/*.json
 data/xiaomi/rejected/**/*.jsonl
 data/xiaomi/manifests/*.json
 data/xiaomi/manifests/**/*.json

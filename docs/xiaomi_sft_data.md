@@ -168,3 +168,21 @@ python scripts/diagnose_sft_v0_4.py \
   --max-seq-len 512 \
   --out /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/sft_diagnostics.json
 ```
+
+## v0.4.2 Lite Replay Workflow
+
+For the smaller 30M base, prefer the stricter Dolly-lite plus TinyStories replay workflow before another SFT run. The detailed rationale and commands are in `docs/sft_experimentation_v0_4.md`.
+
+The short form is:
+
+```bash
+python scripts/convert_dolly_lite_to_sft.py
+python scripts/make_tinystories_replay_sft.py --count 1000 --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json
+python scripts/mix_sft_sources.py \
+  --source everyday=/mnt/c/Users/hustlePC/PycharmProjects/sft-examples/public_converted/everyday_single_sft_v0_4.jsonl:cap=1500 \
+  --source dolly_lite=/mnt/c/Users/hustlePC/PycharmProjects/sft-examples/public_converted/dolly_lite_sft_v0_4.jsonl:cap=2500 \
+  --source xiaomi=/mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_1000_seeded.jsonl:cap=800 \
+  --source replay=data/xiaomi/processed/replay/tinystories_replay_sft_v0_4.jsonl:cap=1200 \
+  --out /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/public_converted/mixed_lite_replay_v0_4.jsonl \
+  --manifest /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/mixed_lite_replay_v0_4_manifest.json
+```
