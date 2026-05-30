@@ -227,10 +227,15 @@ def _has_obvious_loop(words: list[str]) -> bool:
     return False
 
 
-def _passes_content_filters(row: dict[str, Any]) -> ValidationResult:
+def _passes_content_filters(
+    row: dict[str, Any],
+    *,
+    is_replay: bool = False,
+    disable_replay_low_diversity_filter: bool = False,
+) -> ValidationResult:
     instruction = str(row["instruction"])
     output = str(row["output"])
-    if _word_count(instruction) < 4:
+    if not is_replay and _word_count(instruction) < 4:
         return ValidationResult(False, "instruction_too_short")
     output_words = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", output.lower())
     if len(output_words) < 20:
@@ -239,8 +244,16 @@ def _passes_content_filters(row: dict[str, Any]) -> ValidationResult:
         return ValidationResult(False, "not_english_printable")
     if _has_repeated_exact_sentence(output):
         return ValidationResult(False, "repeated_sentence")
-    if len(output_words) >= 20 and len(set(output_words)) / len(output_words) < 0.25:
-        return ValidationResult(False, "low_unique_word_ratio")
+    if len(output_words) >= 20:
+        unique_ratio = len(set(output_words)) / len(output_words)
+        if is_replay and disable_replay_low_diversity_filter:
+            if unique_ratio < 0.08:
+                return ValidationResult(False, "extremely_low_unique_word_ratio")
+        elif is_replay:
+            if unique_ratio < 0.15:
+                return ValidationResult(False, "low_unique_word_ratio")
+        elif unique_ratio < 0.25:
+            return ValidationResult(False, "low_unique_word_ratio")
     if _has_obvious_loop(output_words):
         return ValidationResult(False, "obvious_loop")
     return ValidationResult(True)
@@ -252,6 +265,11 @@ def _normalize_for_dedup(text: str) -> str:
 
 def _dedup_key(row: dict[str, Any]) -> str:
     normalized = _normalize_for_dedup(str(row["instruction"])) + "\n" + _normalize_for_dedup(str(row["output"]))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _output_dedup_key(row: dict[str, Any]) -> str:
+    normalized = _normalize_for_dedup(str(row["output"]))
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
@@ -301,7 +319,22 @@ def _passes_score_filter(row: dict[str, Any], scores_by_example_id: dict[str, di
 
 
 def _reject_record(row: Any, reason: str, detail: str | None = None) -> dict[str, Any]:
-    return {"reason": reason, "detail": detail, "row": row}
+    if isinstance(row, dict):
+        source = row.get("source")
+        task_type = row.get("task_type")
+        row_id = row.get("id")
+    else:
+        source = None
+        task_type = None
+        row_id = None
+    return {
+        "reason": reason,
+        "detail": detail,
+        "source": source,
+        "task_type": task_type,
+        "id": row_id,
+        "record": row,
+    }
 
 
 def _split_stratified(rows: list[dict[str, Any]], *, val_ratio: float, seed: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -347,7 +380,14 @@ def build_sft_splits(
     seed: int,
     max_seq_len: int,
     manifest_path: str | Path | None = None,
+    replay_source_prefix: str = "tinystories_replay",
+    keep_replay_duplicates: bool = False,
+    replay_dedup_mode: str = "output_hash",
+    disable_replay_low_diversity_filter: bool = False,
 ) -> dict[str, Any]:
+    if replay_dedup_mode not in {"output_hash", "none"}:
+        raise ValueError(f"Unsupported replay_dedup_mode: {replay_dedup_mode}")
+
     raw_path = Path(raw_path)
     tokenizer_path = Path(tokenizer_path)
     train_path = Path(train_path)
@@ -360,42 +400,77 @@ def build_sft_splits(
     scores_by_example_id = _read_scores(scored_path)
 
     rejected: dict[str, list[dict[str, Any]]] = {key: [] for key in REJECT_FILES}
-    for raw_line, detail in parse_errors:
-        rejected["malformed"].append(_reject_record(raw_line, "json_decode_error", detail))
-
     accepted: list[dict[str, Any]] = []
     seen_hashes: set[str] = set()
+    seen_replay_output_hashes: set[str] = set()
     seen_instruction_sets: list[set[str]] = []
+    accepted_by_source: Counter[str] = Counter()
+    rejected_by_source: Counter[str] = Counter()
+    accepted_by_task_type: Counter[str] = Counter()
+    rejected_by_task_type: Counter[str] = Counter()
+    rejected_reason_by_source: dict[str, Counter[str]] = defaultdict(Counter)
+
+    def reject(category: str, row: Any, reason: str, detail: str | None = None) -> None:
+        rejected[category].append(_reject_record(row, reason, detail))
+        if isinstance(row, dict):
+            source = str(row.get("source", "UNKNOWN"))
+            task_type = str(row.get("task_type", "UNKNOWN"))
+        else:
+            source = "UNKNOWN"
+            task_type = "UNKNOWN"
+        rejected_by_source[source] += 1
+        rejected_by_task_type[task_type] += 1
+        rejected_reason_by_source[source][category] += 1
+
+    for raw_line, detail in parse_errors:
+        reject("malformed", raw_line, "json_decode_error", detail)
 
     for row in rows:
         structural = validate_raw_sft_row(row)
         if not structural.ok:
-            rejected["malformed"].append(_reject_record(row, structural.reason or "malformed", structural.detail))
+            reject("malformed", row, structural.reason or "malformed", structural.detail)
             continue
+
+        is_replay = str(row["source"]).startswith(replay_source_prefix)
 
         try:
             build_sft_features(row, tokenizer, max_seq_len=max_seq_len)
         except ValueError as exc:
-            rejected["too_long"].append(_reject_record(row, "too_long", str(exc)))
+            reject("too_long", row, "too_long", str(exc))
             continue
 
-        content = _passes_content_filters(row)
+        content = _passes_content_filters(
+            row,
+            is_replay=is_replay,
+            disable_replay_low_diversity_filter=disable_replay_low_diversity_filter,
+        )
         if not content.ok:
-            rejected["filtered"].append(_reject_record(row, content.reason or "filtered", content.detail))
+            reject("filtered", row, content.reason or "filtered", content.detail)
             continue
 
-        key = _dedup_key(row)
-        if key in seen_hashes or _is_near_duplicate_instruction(row, seen_instruction_sets):
-            rejected["duplicates"].append(_reject_record(row, "duplicate"))
-            continue
+        if is_replay and keep_replay_duplicates:
+            if replay_dedup_mode == "output_hash":
+                replay_key = _output_dedup_key(row)
+                if replay_key in seen_replay_output_hashes:
+                    reject("duplicates", row, "duplicate")
+                    continue
+                seen_replay_output_hashes.add(replay_key)
+        else:
+            key = _dedup_key(row)
+            if key in seen_hashes or _is_near_duplicate_instruction(row, seen_instruction_sets):
+                reject("duplicates", row, "duplicate")
+                continue
 
         score_result = _passes_score_filter(row, scores_by_example_id)
         if not score_result.ok:
-            rejected["filtered"].append(_reject_record(row, score_result.reason or "score_filtered", score_result.detail))
+            reject("filtered", row, score_result.reason or "score_filtered", score_result.detail)
             continue
 
-        seen_hashes.add(key)
-        seen_instruction_sets.append(_instruction_tokens(row))
+        if not (is_replay and keep_replay_duplicates):
+            seen_hashes.add(key)
+            seen_instruction_sets.append(_instruction_tokens(row))
+        accepted_by_source[str(row["source"])] += 1
+        accepted_by_task_type[str(row["task_type"])] += 1
         accepted.append(row)
 
     train_rows, val_rows = _split_stratified(accepted, val_ratio=val_ratio, seed=seed)
@@ -417,6 +492,13 @@ def build_sft_splits(
         "total_raw_rows": len(rows) + len(parse_errors),
         "accepted_rows": len(accepted),
         "rejected_counts": {key: len(value) for key, value in rejected.items()},
+        "accepted_by_source": dict(sorted(accepted_by_source.items())),
+        "rejected_by_source": dict(sorted(rejected_by_source.items())),
+        "accepted_by_task_type": dict(sorted(accepted_by_task_type.items())),
+        "rejected_by_task_type": dict(sorted(rejected_by_task_type.items())),
+        "rejected_reason_by_source": {
+            source: dict(sorted(counts.items())) for source, counts in sorted(rejected_reason_by_source.items())
+        },
         "train_count": len(train_rows),
         "val_count": len(val_rows),
         "category_distribution": _category_distribution(train_rows, val_rows),

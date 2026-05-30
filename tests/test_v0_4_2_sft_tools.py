@@ -6,6 +6,8 @@ from pathlib import Path
 from scripts.convert_dolly_lite_to_sft import convert_dolly_lite
 from scripts.make_tinystories_replay_sft import make_tinystories_replay
 from scripts.mix_sft_sources import mix_sft_sources, parse_source_spec
+from sarych.sft import build_sft_splits
+from sarych.tokenizer_bpe import train_byte_bpe_tokenizer
 from scripts.run_sft_experiment_grid import build_experiment_commands, run_sft_experiment_grid
 
 
@@ -25,6 +27,35 @@ def _sft_row(row_id: str, source: str, task_type: str, instruction: str, output:
         "language": "en",
         "metadata": {"fixture": True},
     }
+
+
+def _tiny_tokenizer(tmp_path: Path):
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text(
+        "\n".join(
+            [
+                "<|user|>\nWrite a short simple story.\n\n<|assistant|>\nThe kind fox helped a little bird find a warm nest before sunset.<|endoftext|>",
+                "Mia held a bright kite and walked slowly up the grassy hill with her dad.",
+                "The kitten found a blue button, gave it back to Ben, and purred softly.",
+                "Rain helped the tiny flowers stand tall in the garden after a warm morning.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return train_byte_bpe_tokenizer(
+        input_paths=[corpus],
+        output_path=tmp_path / "tokenizer.json",
+        vocab_size=512,
+        special_tokens=["<|endoftext|>", "<|pad|>"],
+    )
+
+
+def _story_output(index: int) -> str:
+    return (
+        f"Story {index} began when a kind child found a small lost toy near the garden gate. "
+        f"The child asked two friends for help, looked under the bench, and listened carefully. "
+        f"At last they found the toy beside a flower pot and returned it before supper."
+    )
 
 
 def test_dolly_lite_filters_and_maps_to_allowed_task_types(tmp_path):
@@ -115,6 +146,195 @@ def test_tinystories_replay_creates_story_and_continuation_rows(tmp_path):
     assert {row["source"] for row in rows} == {"tinystories_replay"}
     assert any(row["input"] for row in rows if row["task_type"] == "story_continuation")
     assert json.loads(manifest.read_text(encoding="utf-8"))["written_rows"] == 4
+
+
+def test_replay_duplicate_policy_keeps_repeated_instruction_templates(tmp_path):
+    _tiny_tokenizer(tmp_path)
+    rows = [
+        _sft_row(
+            f"replay_{index:03d}",
+            "tinystories_replay",
+            "story_writing",
+            "Write a short simple story.",
+            _story_output(index),
+        )
+        for index in range(20)
+    ]
+    raw_path = tmp_path / "replay.jsonl"
+    _write_jsonl(raw_path, rows)
+
+    manifest = build_sft_splits(
+        raw_path=raw_path,
+        scored_path=None,
+        tokenizer_path=tmp_path / "tokenizer.json",
+        train_path=tmp_path / "train.jsonl",
+        val_path=tmp_path / "val.jsonl",
+        rejected_dir=tmp_path / "rejected",
+        val_ratio=0.1,
+        seed=123,
+        max_seq_len=512,
+        replay_source_prefix="tinystories_replay",
+        keep_replay_duplicates=True,
+        replay_dedup_mode="output_hash",
+        disable_replay_low_diversity_filter=True,
+    )
+
+    assert manifest["accepted_rows"] == 20
+    assert manifest["rejected_counts"]["duplicates"] == 0
+    assert manifest["accepted_by_source"] == {"tinystories_replay": 20}
+
+
+def test_non_replay_duplicate_policy_still_rejects_repeated_instruction_templates(tmp_path):
+    _tiny_tokenizer(tmp_path)
+    rows = [
+        _sft_row(
+            f"regular_{index:03d}",
+            "databricks_dolly_15k_lite",
+            "story_writing",
+            "Write a short simple story.",
+            _story_output(index),
+        )
+        for index in range(20)
+    ]
+    raw_path = tmp_path / "regular.jsonl"
+    _write_jsonl(raw_path, rows)
+
+    manifest = build_sft_splits(
+        raw_path=raw_path,
+        scored_path=None,
+        tokenizer_path=tmp_path / "tokenizer.json",
+        train_path=tmp_path / "train.jsonl",
+        val_path=tmp_path / "val.jsonl",
+        rejected_dir=tmp_path / "rejected",
+        val_ratio=0.1,
+        seed=123,
+        max_seq_len=512,
+        replay_source_prefix="tinystories_replay",
+        keep_replay_duplicates=True,
+        replay_dedup_mode="output_hash",
+    )
+
+    assert manifest["accepted_rows"] == 1
+    assert manifest["rejected_counts"]["duplicates"] == 19
+    assert manifest["rejected_by_source"] == {"databricks_dolly_15k_lite": 19}
+
+
+def test_rejected_rows_include_original_metadata_and_record(tmp_path):
+    _tiny_tokenizer(tmp_path)
+    duplicate = _sft_row(
+        "dup_2",
+        "databricks_dolly_15k_lite",
+        "story_writing",
+        "Write a short simple story.",
+        _story_output(1),
+    )
+    rows = [
+        _sft_row("dup_1", "databricks_dolly_15k_lite", "story_writing", "Write a short simple story.", _story_output(1)),
+        duplicate,
+        _sft_row("bad_1", "tinystories_replay", "story_writing", "Write a short simple story.", ""),
+    ]
+    raw_path = tmp_path / "raw.jsonl"
+    _write_jsonl(raw_path, rows)
+
+    build_sft_splits(
+        raw_path=raw_path,
+        scored_path=None,
+        tokenizer_path=tmp_path / "tokenizer.json",
+        train_path=tmp_path / "train.jsonl",
+        val_path=tmp_path / "val.jsonl",
+        rejected_dir=tmp_path / "rejected",
+        val_ratio=0.0,
+        seed=123,
+        max_seq_len=512,
+    )
+
+    duplicate_reject = json.loads((tmp_path / "rejected" / "duplicates.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    malformed_reject = json.loads((tmp_path / "rejected" / "malformed.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert duplicate_reject["reason"] == "duplicate"
+    assert duplicate_reject["source"] == duplicate["source"]
+    assert duplicate_reject["task_type"] == duplicate["task_type"]
+    assert duplicate_reject["id"] == duplicate["id"]
+    assert duplicate_reject["record"] == duplicate
+    assert malformed_reject["source"] == "tinystories_replay"
+    assert malformed_reject["task_type"] == "story_writing"
+    assert malformed_reject["id"] == "bad_1"
+    assert "record" in malformed_reject
+
+
+def test_source_aware_manifest_reports_accepts_rejects_and_reasons(tmp_path):
+    _tiny_tokenizer(tmp_path)
+    replay_rows = [
+        _sft_row(f"replay_{index}", "tinystories_replay", "story_writing", "Write a short simple story.", _story_output(index))
+        for index in range(3)
+    ]
+    regular_rows = [
+        _sft_row("regular_1", "databricks_dolly_15k_lite", "story_writing", "Write a short simple story.", _story_output(30)),
+        _sft_row("regular_2", "databricks_dolly_15k_lite", "story_writing", "Write a short simple story.", _story_output(31)),
+    ]
+    raw_path = tmp_path / "mixed.jsonl"
+    _write_jsonl(raw_path, replay_rows + regular_rows)
+
+    manifest = build_sft_splits(
+        raw_path=raw_path,
+        scored_path=None,
+        tokenizer_path=tmp_path / "tokenizer.json",
+        train_path=tmp_path / "train.jsonl",
+        val_path=tmp_path / "val.jsonl",
+        rejected_dir=tmp_path / "rejected",
+        val_ratio=0.0,
+        seed=123,
+        max_seq_len=512,
+        replay_source_prefix="tinystories_replay",
+        keep_replay_duplicates=True,
+        replay_dedup_mode="output_hash",
+    )
+
+    assert manifest["accepted_by_source"] == {"databricks_dolly_15k_lite": 1, "tinystories_replay": 3}
+    assert manifest["rejected_by_source"] == {"databricks_dolly_15k_lite": 1}
+    assert manifest["accepted_by_task_type"] == {"story_writing": 4}
+    assert manifest["rejected_by_task_type"] == {"story_writing": 1}
+    assert manifest["rejected_reason_by_source"] == {"databricks_dolly_15k_lite": {"duplicates": 1}}
+
+
+def test_tinystories_replay_generator_manifest_and_modes(tmp_path):
+    source = tmp_path / "TinyStories-valid.txt"
+    output = tmp_path / "replay" / "tinystories_replay_sft_v0_4.jsonl"
+    manifest_path = tmp_path / "replay" / "manifest.json"
+    stories = []
+    for index in range(6):
+        stories.append(
+            (
+                f"Story {index} had a gentle child named Mia. She found a lost kitten near the blue gate. "
+                "Mia called softly, gave the kitten water, and waited beside the path. "
+                "Soon the kitten's owner came back, smiled, and thanked Mia for being kind."
+            )
+        )
+    source.write_text("\n<|endoftext|>\n".join(stories), encoding="utf-8")
+
+    manifest = make_tinystories_replay(
+        source,
+        output,
+        count=8,
+        seed=7,
+        manifest_path=manifest_path,
+        mode="mixed",
+        min_words=20,
+        max_words=80,
+        unique_instructions=True,
+    )
+
+    rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert rows
+    assert all(row["source"].startswith("tinystories_replay") for row in rows)
+    assert {row["task_type"] for row in rows} <= {"story_writing", "story_continuation"}
+    assert manifest["stories_read"] == 6
+    assert manifest["rows_written"] == len(rows)
+    assert "story_writing_count" in manifest
+    assert "story_continuation_count" in manifest
+    assert "skipped_short" in manifest
+    assert "skipped_long" in manifest
+    assert "tokenizer_rejected_too_long" in manifest
+    assert json.loads(manifest_path.read_text(encoding="utf-8"))["rows_written"] == len(rows)
 
 
 def test_mix_sft_sources_respects_caps_dedups_and_seed(tmp_path):

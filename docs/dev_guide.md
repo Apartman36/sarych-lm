@@ -300,13 +300,24 @@ python scripts/eval_sarych.py \
 
 The v0.4 SFT trainer uses output-only next-token loss masking. Labels are `-100` for prompt content and padding. The final prompt token predicts the first assistant output token, then output tokens predict the next output token through `<|endoftext|>`.
 
-## v0.4.2 Lite Replay Experiments
+## v0.4.3 Lite Replay Experiments
 
-Use `docs/sft_experimentation_v0_4.md` for the Dolly-lite, TinyStories replay, source mixing, and lower-LR grid workflow. The two conservative configs are:
+Use `docs/sft_experimentation_v0_4.md` for the Dolly-lite, TinyStories replay, source mixing, source-aware SFT build, and lower-LR grid workflow. Replay builds should pass:
+
+```bash
+--replay-source-prefix tinystories_replay \
+--keep-replay-duplicates \
+--replay-dedup-mode output_hash \
+--disable-replay-low-diversity-filter
+```
+
+This keeps repeated TinyStories replay instruction templates from being rejected by the non-replay duplicate-instruction policy. The manifest fields `accepted_by_source`, `rejected_by_source`, and `rejected_reason_by_source` are the first checks when replay acceptance looks wrong.
+
+The two conservative replay configs are:
 
 ```text
-configs/v0_4_30m_instruct_lite_lr2e5.yaml
-configs/v0_4_30m_instruct_lite_lr1e5.yaml
+configs/v0_4_30m_instruct_lite_replay_lr1e5.yaml
+configs/v0_4_30m_instruct_lite_replay_lr5e6.yaml
 ```
 
 Run a dry grid check without training:
@@ -319,8 +330,8 @@ Run the short grid only after processed SFT splits are rebuilt:
 
 ```bash
 python scripts/run_sft_experiment_grid.py \
-  --config configs/v0_4_30m_instruct_lite_lr2e5.yaml \
-  --config configs/v0_4_30m_instruct_lite_lr1e5.yaml \
+  --config configs/v0_4_30m_instruct_lite_replay_lr1e5.yaml \
+  --config configs/v0_4_30m_instruct_lite_replay_lr5e6.yaml \
   --steps 100 200 300
 ```
 

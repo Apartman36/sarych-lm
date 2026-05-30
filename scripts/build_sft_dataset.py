@@ -24,6 +24,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-ratio", type=float, default=0.02)
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--max-seq-len", type=int, default=512)
+    parser.add_argument("--replay-source-prefix", default="tinystories_replay")
+    parser.add_argument("--keep-replay-duplicates", action="store_true")
+    parser.add_argument("--replay-dedup-mode", choices=["output_hash", "none"], default="output_hash")
+    parser.add_argument("--disable-replay-low-diversity-filter", action="store_true")
     return parser.parse_args()
 
 
@@ -40,6 +44,10 @@ def main() -> None:
         seed=args.seed,
         max_seq_len=args.max_seq_len,
         manifest_path=args.manifest,
+        replay_source_prefix=args.replay_source_prefix,
+        keep_replay_duplicates=args.keep_replay_duplicates,
+        replay_dedup_mode=args.replay_dedup_mode,
+        disable_replay_low_diversity_filter=args.disable_replay_low_diversity_filter,
     )
     print(json.dumps(manifest, indent=2, sort_keys=True))
 

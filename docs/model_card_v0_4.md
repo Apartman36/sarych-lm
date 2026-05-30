@@ -49,11 +49,12 @@ Category mix:
 
 No code tasks are included in v0.4.
 
-The v0.4.2 experimentation pass adds a local-only lite replay recipe:
+The v0.4.3 experimentation pass adds a local-only lite replay recipe:
 
 - Dolly-lite conversion from already downloaded Dolly raw JSONL with aggressive filtering.
 - TinyStories replay rows to preserve the base model's simple narrative behavior.
 - Source-capped mixing across everyday, Dolly-lite, Xiaomi seeded, and replay data.
+- Source-aware SFT filtering so replay rows are not rejected merely because they reuse story-writing or continuation instruction templates.
 
 This is an experiment recipe, not a committed dataset or final checkpoint.
 

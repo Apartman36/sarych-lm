@@ -21,8 +21,16 @@ DEFAULT_INSTRUCTIONS = [
     "Write a short simple story.",
     "Write a short story for children.",
     "Tell a gentle story with a clear ending.",
+    "Write a tiny story about kind friends.",
+    "Tell a simple bedtime story.",
+    "Write a warm story with a happy ending.",
 ]
-CONTINUATION_INSTRUCTION = "Continue this simple story."
+CONTINUATION_INSTRUCTIONS = [
+    "Continue this simple story.",
+    "Finish this gentle story.",
+    "Continue the story in simple English.",
+    "Write what happens next in the story.",
+]
 
 
 def _word_count(text: str) -> int:
@@ -44,6 +52,16 @@ def _split_stories(text: str) -> list[str]:
         if story:
             stories.append(story)
     return stories
+
+
+def _is_clean_story_span(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped or stripped[-1] not in ".!?":
+        return False
+    sentences = _split_sentences(stripped)
+    if len(sentences) < 2:
+        return False
+    return all(sentence[0].isupper() or sentence[0].isdigit() for sentence in sentences if sentence)
 
 
 def _fits_token_budget(
@@ -85,7 +103,16 @@ def make_tinystories_replay(
     seed: int = 1337,
     manifest_path: str | Path | None = None,
     max_seq_len: int = 512,
+    mode: str = "mixed",
+    min_words: int = 40,
+    max_words: int = 140,
+    unique_instructions: bool = False,
 ) -> dict[str, Any]:
+    if mode not in {"story_writing", "story_continuation", "mixed"}:
+        raise ValueError(f"Unsupported replay mode: {mode}")
+    if min_words <= 0 or max_words < min_words:
+        raise ValueError("min_words must be positive and max_words must be greater than or equal to min_words.")
+
     input_path = Path(input_path)
     output_path = Path(output_path)
     tokenizer = SarychBPETokenizer.from_file(tokenizer_path) if tokenizer_path else None
@@ -93,11 +120,24 @@ def make_tinystories_replay(
     stories = _split_stories(input_path.read_text(encoding="utf-8"))
 
     candidates: list[dict[str, Any]] = []
-    for story in stories:
+    skipped_short = 0
+    skipped_long = 0
+    skipped_unclean = 0
+    tokenizer_rejected_too_long = 0
+    for story_index, story in enumerate(stories, start=1):
         wc = _word_count(story)
-        if 40 <= wc <= 140:
+        clean_story = _is_clean_story_span(story)
+        if not clean_story:
+            skipped_unclean += 1
+        if mode in {"story_writing", "mixed"} and clean_story:
             instruction = rng.choice(DEFAULT_INSTRUCTIONS)
-            if _fits_token_budget(
+            if unique_instructions:
+                instruction = f"{instruction} Replay story {story_index}."
+            if wc < min_words:
+                skipped_short += 1
+            elif wc > max_words:
+                skipped_long += 1
+            elif _fits_token_budget(
                 instruction=instruction,
                 input_text="",
                 output=story,
@@ -112,15 +152,26 @@ def make_tinystories_replay(
                         "output": story,
                     }
                 )
+            else:
+                tokenizer_rejected_too_long += 1
 
         sentences = _split_sentences(story)
-        if len(sentences) >= 3:
+        if mode in {"story_continuation", "mixed"} and clean_story and len(sentences) >= 3:
             prefix_count = 1 if len(sentences) <= 4 else rng.choice([1, 2])
             input_text = " ".join(sentences[:prefix_count])
             continuation = " ".join(sentences[prefix_count:]).strip()
             continuation_wc = _word_count(continuation)
-            if 40 <= continuation_wc <= 140 and _fits_token_budget(
-                instruction=CONTINUATION_INSTRUCTION,
+            instruction = rng.choice(CONTINUATION_INSTRUCTIONS)
+            if unique_instructions:
+                instruction = f"{instruction} Replay continuation {story_index}."
+            if continuation_wc < min_words:
+                skipped_short += 1
+            elif continuation_wc > max_words:
+                skipped_long += 1
+            elif not _is_clean_story_span(continuation):
+                skipped_unclean += 1
+            elif _fits_token_budget(
+                instruction=instruction,
                 input_text=input_text,
                 output=continuation,
                 tokenizer=tokenizer,
@@ -129,11 +180,13 @@ def make_tinystories_replay(
                 candidates.append(
                     {
                         "task_type": "story_continuation",
-                        "instruction": CONTINUATION_INSTRUCTION,
+                        "instruction": instruction,
                         "input": input_text,
                         "output": continuation,
                     }
                 )
+            else:
+                tokenizer_rejected_too_long += 1
 
     rng.shuffle(candidates)
     selected = candidates[: max(0, count)]
@@ -152,6 +205,18 @@ def make_tinystories_replay(
         "converter": "make_tinystories_replay_sft",
         "source_path": str(input_path),
         "output_path": str(output_path),
+        "stories_read": len(stories),
+        "rows_written": len(rows),
+        "story_writing_count": task_counts.get("story_writing", 0),
+        "story_continuation_count": task_counts.get("story_continuation", 0),
+        "skipped_short": skipped_short,
+        "skipped_long": skipped_long,
+        "skipped_unclean": skipped_unclean,
+        "tokenizer_rejected_too_long": tokenizer_rejected_too_long,
+        "mode": mode,
+        "min_words": min_words,
+        "max_words": max_words,
+        "unique_instructions": unique_instructions,
         "raw_stories": len(stories),
         "candidate_rows": len(candidates),
         "written_rows": len(rows),
@@ -185,6 +250,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--manifest", default="data/xiaomi/processed/replay/tinystories_replay_sft_v0_4_manifest.json")
     parser.add_argument("--max-seq-len", type=int, default=512)
+    parser.add_argument("--mode", choices=["story_writing", "story_continuation", "mixed"], default="mixed")
+    parser.add_argument("--min-words", type=int, default=40)
+    parser.add_argument("--max-words", type=int, default=140)
+    parser.add_argument("--unique-instructions", action="store_true")
     return parser.parse_args()
 
 
@@ -198,6 +267,10 @@ def main() -> None:
         seed=args.seed,
         manifest_path=args.manifest,
         max_seq_len=args.max_seq_len,
+        mode=args.mode,
+        min_words=args.min_words,
+        max_words=args.max_words,
+        unique_instructions=args.unique_instructions,
     )
     print(json.dumps(manifest, indent=2, sort_keys=True))
 
