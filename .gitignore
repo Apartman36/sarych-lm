@@ -4,6 +4,14 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.cache/
+.pip-cache/
+pip-wheel-metadata/
+.tox/
+.nox/
+build/
+dist/
+*.egg-info/
 .idea/
 .vscode/
 
@@ -15,6 +23,7 @@ data/raw/*
 data/processed/*
 !data/processed/.gitkeep
 data/tokenizers/*.json
+!data/tokenizers/.gitkeep
 
 *.pt
 *.bin

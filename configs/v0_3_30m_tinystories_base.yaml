@@ -1,0 +1,56 @@
+project_name: sarych-lm
+run_name: sarych-30m-tinystories-base
+seed: 1337
+
+model:
+  vocab_size: 8192
+  block_size: 512
+  n_layer: 10
+  n_head: 8
+  n_embd: 448
+  d_ff: 1344
+  dropout: 0.0
+  bias: false
+  norm: rmsnorm
+  activation: swiglu
+  position_encoding: rope
+  tie_embeddings: true
+
+train:
+  device: auto
+  dtype: auto
+  compile: false
+  max_steps: 10000
+  micro_batch_size: 16
+  grad_accumulation_steps: 4
+  eval_batch_size: 16
+  eval_iters: 50
+  lr: 0.0003
+  min_lr: 0.00003
+  warmup_steps: 500
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  log_every: 20
+  eval_every: 500
+  sample_every: 500
+  checkpoint_every: 500
+  save_best: true
+  resume: true
+  strict_rng_restore: true
+  sample_prompt: Once upon a time
+
+dataset:
+  type: memmap_text
+  tokenizer_path: data/tokenizers/sarych_bpe_8192_tinystories.json
+  train_bin: data/processed/v0_3_tinystories_8192/train.bin
+  val_bin: data/processed/v0_3_tinystories_8192/val.bin
+  block_size: 512
+
+paths:
+  run_dir: runs/v0_3_30m_tinystories_base
+  checkpoint_dir: runs/v0_3_30m_tinystories_base/checkpoints
+  log_path: runs/v0_3_30m_tinystories_base/train_log.jsonl
+  env_report_path: runs/v0_3_30m_tinystories_base/env_report.txt
+  sample_dir: runs/v0_3_30m_tinystories_base/samples
