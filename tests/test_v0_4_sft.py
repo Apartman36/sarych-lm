@@ -9,7 +9,9 @@ import torch
 from sarych.checkpoint import save_checkpoint
 from sarych.config import load_yaml_config, model_config_from_dict
 from sarych.model import SarychLM
+from sarych.sampling import generate_tokens
 from sarych.sft import (
+    IGNORE_INDEX,
     SFTJsonlDataset,
     build_sft_features,
     build_sft_splits,
@@ -207,10 +209,35 @@ def test_sft_dataset_builds_output_only_labels(tmp_path):
     prompt_ids = tokenizer.encode(format_sft_text(row, include_output=False))
     output_ids = tokenizer.encode(row["output"] + "<|endoftext|>")
 
-    assert features.input_ids[: len(prompt_ids)] == prompt_ids
-    assert features.labels[: len(prompt_ids)] == [-100] * len(prompt_ids)
-    assert features.labels[len(prompt_ids) : len(prompt_ids) + len(output_ids)] == output_ids
-    assert features.input_ids == prompt_ids + output_ids
+    assert features.input_ids == prompt_ids + output_ids[:-1]
+    assert features.labels[: len(prompt_ids) - 1] == [IGNORE_INDEX] * (len(prompt_ids) - 1)
+    assert features.labels[len(prompt_ids) - 1 : len(prompt_ids) - 1 + len(output_ids)] == output_ids
+    assert features.labels[len(prompt_ids) - 1] == output_ids[0]
+
+
+def test_sft_batch_alignment_supervises_first_output_token_and_masks_padding(tmp_path):
+    tokenizer = _tiny_tokenizer(tmp_path)
+    row = _valid_row()
+    row["instruction"] = "Instruction"
+    row["output"] = "The fox asked for help."
+    features = build_sft_features(row, tokenizer, max_seq_len=64)
+
+    prompt_ids = tokenizer.encode("<|user|>\nInstruction\n\n<|assistant|>\n")
+    output_ids = tokenizer.encode("The fox asked for help.<|endoftext|>")
+    first_supervised = next(index for index, label in enumerate(features.labels) if label != IGNORE_INDEX)
+
+    assert first_supervised == len(prompt_ids) - 1
+    assert features.input_ids[first_supervised] == prompt_ids[-1]
+    assert features.labels[first_supervised] == output_ids[0]
+    assert features.labels[:first_supervised] == [IGNORE_INDEX] * first_supervised
+    assert any(label != tokenizer.token_to_id("<|endoftext|>") for label in features.labels if label != IGNORE_INDEX)
+
+    data_path = tmp_path / "aligned.jsonl"
+    _write_jsonl(data_path, [row])
+    dataset = SFTJsonlDataset(data_path, tokenizer, max_seq_len=64, seed=42)
+    _, labels = dataset.get_batch(batch_size=1, device=torch.device("cpu"))
+
+    assert torch.all(labels[0, len(features.labels) :] == IGNORE_INDEX)
 
 
 def test_sft_jsonl_dataset_pads_labels_with_ignore_index(tmp_path):
@@ -321,6 +348,89 @@ def test_train_sft_v0_4_smoke_runs_two_cpu_steps(tmp_path):
     assert result["final_step"] == 2
     assert Path(result["last_checkpoint_path"]).exists()
     assert (tmp_path / "run" / "train_log.jsonl").exists()
+
+
+def test_tiny_sft_memorizes_exact_prompt_without_immediate_eos_or_whitespace(tmp_path):
+    rows = [
+        {
+            **_valid_row("xm_sft_910001", "story_writing"),
+            "instruction": "Write the fox sentence.",
+            "output": "The red fox asked the owl for help.",
+        },
+        {
+            **_valid_row("xm_sft_910002", "story_writing"),
+            "instruction": "Write the bird sentence.",
+            "output": "The blue bird sang beside the pond.",
+        },
+        {
+            **_valid_row("xm_sft_910003", "story_writing"),
+            "instruction": "Write the turtle sentence.",
+            "output": "The small turtle waited by the gate.",
+        },
+    ]
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text(
+        "\n".join(
+            [
+                format_sft_text(row)
+                for row in rows
+            ]
+        ),
+        encoding="utf-8",
+    )
+    tokenizer = train_byte_bpe_tokenizer(
+        input_paths=[corpus],
+        output_path=tmp_path / "tokenizer.json",
+        vocab_size=384,
+        special_tokens=["<|endoftext|>", "<|pad|>"],
+    )
+    features = [build_sft_features(row, tokenizer, max_seq_len=64) for row in rows]
+    config = {
+        "model": {
+            "vocab_size": tokenizer.vocab_size,
+            "block_size": 64,
+            "n_layer": 1,
+            "n_head": 2,
+            "n_embd": 32,
+            "d_ff": 96,
+            "dropout": 0.0,
+            "bias": False,
+            "norm": "rmsnorm",
+            "activation": "swiglu",
+            "position_encoding": "rope",
+            "tie_embeddings": True,
+        }
+    }
+    model = SarychLM(model_config_from_dict(config))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-3)
+    pad_id = tokenizer.token_to_id("<|pad|>")
+    assert pad_id is not None
+
+    x = torch.full((len(features), 64), pad_id, dtype=torch.long)
+    y = torch.full((len(features), 64), IGNORE_INDEX, dtype=torch.long)
+    for index, feature in enumerate(features):
+        x[index, : len(feature.input_ids)] = torch.tensor(feature.input_ids, dtype=torch.long)
+        y[index, : len(feature.labels)] = torch.tensor(feature.labels, dtype=torch.long)
+
+    for _ in range(120):
+        optimizer.zero_grad(set_to_none=True)
+        _, loss = model(x, y)
+        loss.backward()
+        optimizer.step()
+
+    prompt_ids = tokenizer.encode(format_instruct_prompt("Write the fox sentence.", ""))
+    generated = generate_tokens(
+        model,
+        torch.tensor([prompt_ids], dtype=torch.long),
+        max_new_tokens=12,
+        temperature=0.0,
+        vocab_size_limit=tokenizer.vocab_size,
+    )[0].tolist()
+    generated_text = tokenizer.decode(generated[len(prompt_ids) :], skip_special_tokens=True)
+
+    assert generated[len(prompt_ids)] != tokenizer.token_to_id("<|endoftext|>")
+    assert generated_text.strip()
+    assert any(word in generated_text.lower() for word in ("red", "fox", "owl"))
 
 
 def test_generate_instruct_prompt_format():

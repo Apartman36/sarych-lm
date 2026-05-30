@@ -21,6 +21,34 @@ The set contains 50 prompts across:
 
 ## Run Evaluation
 
+Before comparing full eval outputs, inspect the processed SFT data and prompt logits:
+
+```bash
+python scripts/diagnose_sft_v0_4.py \
+  --train data/xiaomi/processed/sft/train.jsonl \
+  --val data/xiaomi/processed/sft/val.jsonl \
+  --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
+  --base-checkpoint runs/v0_3_30m_tinystories_base/checkpoints/checkpoint_latest.pt \
+  --sft-checkpoint runs/v0_4_30m_instruct_xiaomi/checkpoints/checkpoint_latest.pt \
+  --top-k 10
+```
+
+Generation diagnostics can show whether EOS is the first predicted token after `<|assistant|>`:
+
+```bash
+python scripts/generate_instruct_v0_4.py \
+  --checkpoint runs/v0_4_30m_instruct_xiaomi/checkpoints/checkpoint_latest.pt \
+  --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
+  --instruction "Write a short story for young children about a turtle who asks for help." \
+  --max-new-tokens 120 \
+  --temperature 0.8 \
+  --top-k 50 \
+  --debug-top-k 10 \
+  --no-print-prompt
+```
+
+`--min-new-tokens-before-eos` and `--suppress-eos-for-first-n-tokens` are diagnostic options only. They can reveal whether the model has learned useful continuation tokens behind an early EOS preference, but they should not be used to hide a failing checkpoint.
+
 ```bash
 python scripts/eval_sarych.py \
   --prompts eval/prompts_v0_4.jsonl \

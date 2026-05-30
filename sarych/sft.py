@@ -110,10 +110,14 @@ def format_sft_text(row: dict[str, Any], *, include_output: bool = True) -> str:
 def build_sft_features(row: dict[str, Any], tokenizer: SarychBPETokenizer, *, max_seq_len: int) -> SFTFeatures:
     prompt_ids = tokenizer.encode(format_sft_text(row, include_output=False))
     output_ids = tokenizer.encode(str(row["output"]).strip() + EOT_TOKEN)
-    input_ids = prompt_ids + output_ids
+    if not prompt_ids:
+        raise ValueError(f"SFT example {row.get('id', '<unknown>')} produced an empty prompt.")
+    if not output_ids:
+        raise ValueError(f"SFT example {row.get('id', '<unknown>')} produced an empty output.")
+    input_ids = prompt_ids + output_ids[:-1]
     if len(input_ids) > max_seq_len:
         raise ValueError(f"SFT example {row.get('id', '<unknown>')} has {len(input_ids)} tokens; max is {max_seq_len}.")
-    labels = [IGNORE_INDEX] * len(prompt_ids) + output_ids
+    labels = [IGNORE_INDEX] * (len(prompt_ids) - 1) + output_ids
     return SFTFeatures(input_ids=input_ids, labels=labels)
 
 

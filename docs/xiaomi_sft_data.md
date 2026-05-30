@@ -94,12 +94,58 @@ Safety score must be 5 when present. Other present scores should be at least 4, 
 - Generation should not use web browsing.
 - Generated raw, scored, rejected, processed, manifest, and log files should not be committed.
 
+## Seeded Generation Workflow
+
+Do not ask the external generator to invent large batches freely. First create deterministic seed tasks, then ask OpenCode/Xiaomi manually to expand each seed into exactly one SFT row.
+
+Generate a 1000-row seed file:
+
+```bash
+python scripts/make_sft_seed_prompts.py \
+  --out /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/seeds/sft_seeds_1000.jsonl \
+  --count 1000 \
+  --start-id 1 \
+  --profile v0_4_child_simple \
+  --seed 1337
+```
+
+Generate 10k seeds in 1000-row shards:
+
+```bash
+python scripts/make_sft_seed_prompts.py \
+  --count 10000 \
+  --start-id 1 \
+  --profile v0_4_child_simple \
+  --seed 1337 \
+  --shard-size 1000 \
+  --out-dir /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/seeds/shards
+```
+
+Use `prompts/xiaomi_sft_from_seeds_v1.md` as the manual OpenCode/Xiaomi prompt template for each seed shard. The template requires strict JSONL, no web browsing, preserved `target_sft_id`, preserved `task_type`, and one final SFT row per seed row.
+
+After manual generation, merge raw shards:
+
+```bash
+python scripts/merge_sft_shards.py \
+  --input-dir /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/shards \
+  --out /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_10000_seeded.jsonl \
+  --manifest /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/sft_10000_seeded_merge_manifest.json
+```
+
+Analyze the raw merged file before building filtered splits:
+
+```bash
+python scripts/analyze_sft_jsonl.py \
+  /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_10000_seeded.jsonl \
+  --out /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/sft_10000_seeded_analysis.json
+```
+
 ## Import Command
 
 ```bash
 python scripts/build_sft_dataset.py \
-  --raw /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_30000.jsonl \
-  --scored /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/scored/sft_30000_scores.jsonl \
+  --raw /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_10000_seeded.jsonl \
+  --scored /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/scored/sft_10000_scores.jsonl \
   --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
   --train-out data/xiaomi/processed/sft/train.jsonl \
   --val-out data/xiaomi/processed/sft/val.jsonl \
@@ -110,3 +156,15 @@ python scripts/build_sft_dataset.py \
 ```
 
 The build script rejects malformed rows, too-short rows, non-English-looking text, repeated or low-diversity output, duplicates, examples over 512 tokens, and low-scored examples.
+
+Run SFT diagnostics on the processed splits before training:
+
+```bash
+python scripts/diagnose_sft_v0_4.py \
+  --train data/xiaomi/processed/sft/train.jsonl \
+  --val data/xiaomi/processed/sft/val.jsonl \
+  --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
+  --base-checkpoint runs/v0_3_30m_tinystories_base/checkpoints/checkpoint_latest.pt \
+  --max-seq-len 512 \
+  --out /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/sft_diagnostics.json
+```

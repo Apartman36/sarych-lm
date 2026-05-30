@@ -20,6 +20,9 @@ runs/**
 !runs/.gitkeep
 artifacts/
 checkpoints/
+sft-examples/
+sarych/update/*.jsonl
+sarych/update/*.json
 
 data/raw/*
 !data/raw/.gitkeep
@@ -32,6 +35,7 @@ data/xiaomi/scored/**/*.jsonl
 data/xiaomi/processed/**/*.jsonl
 data/xiaomi/rejected/**/*.jsonl
 data/xiaomi/manifests/*.json
+data/xiaomi/manifests/**/*.json
 !data/xiaomi/raw/.gitkeep
 !data/xiaomi/raw/sft/.gitkeep
 !data/xiaomi/scored/.gitkeep
@@ -42,7 +46,10 @@ data/xiaomi/manifests/*.json
 logs/xiaomi/*
 !logs/xiaomi/.gitkeep
 eval/results/*.jsonl
+eval/results/*.json
 !eval/results/.gitkeep
+logs/**/*.log
+logs/**/*.jsonl
 
 *.pt
 *.bin

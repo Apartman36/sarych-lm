@@ -29,6 +29,11 @@ train:
   device: auto
   dtype: auto
   compile: false
+  # Step guidance:
+  # - tiny smoke datasets: 50-100 max steps only
+  # - about 1k accepted examples: 300-500 max steps
+  # - 10k+ accepted examples: 1000-2000 max steps
+  # If tiny data overfits or EOS dominates, try lr: 0.00005.
   max_steps: 2000
   micro_batch_size: 16
   grad_accumulation_steps: 2

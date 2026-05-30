@@ -195,22 +195,60 @@ sft-examples/
   manifests/
 ```
 
-Build a tiny 100-example dataset:
+Create deterministic seed shards before any external generation:
+
+```bash
+python scripts/make_sft_seed_prompts.py \
+  --count 10000 \
+  --start-id 1 \
+  --profile v0_4_child_simple \
+  --seed 1337 \
+  --shard-size 1000 \
+  --out-dir /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/seeds/shards
+```
+
+Use `prompts/xiaomi_sft_from_seeds_v1.md` manually with OpenCode/Xiaomi for each shard. SARYCH-LM must not call Xiaomi/OpenCode directly.
+
+Merge and analyze generated raw shards:
+
+```bash
+python scripts/merge_sft_shards.py \
+  --input-dir /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/shards \
+  --out /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_10000_seeded.jsonl \
+  --manifest /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/sft_10000_seeded_merge_manifest.json
+
+python scripts/analyze_sft_jsonl.py \
+  /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_10000_seeded.jsonl \
+  --out /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/sft_10000_seeded_analysis.json
+```
+
+Build filtered train/val splits:
 
 ```bash
 python scripts/build_sft_dataset.py \
-  --raw /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_100.jsonl \
-  --scored /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/scored/sft_100_scores.jsonl \
+  --raw /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_10000_seeded.jsonl \
+  --scored /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/scored/sft_10000_scores.jsonl \
   --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
   --train-out data/xiaomi/processed/sft/train.jsonl \
   --val-out data/xiaomi/processed/sft/val.jsonl \
   --rejected-dir data/xiaomi/rejected \
   --manifest data/xiaomi/manifests/sft_v0_4_manifest.json \
-  --val-ratio 0.05 \
+  --val-ratio 0.02 \
   --seed 1337
 ```
 
-Run a 100-step SFT smoke:
+Diagnose processed SFT data before training:
+
+```bash
+python scripts/diagnose_sft_v0_4.py \
+  --train data/xiaomi/processed/sft/train.jsonl \
+  --val data/xiaomi/processed/sft/val.jsonl \
+  --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
+  --base-checkpoint runs/v0_3_30m_tinystories_base/checkpoints/checkpoint_latest.pt \
+  --max-seq-len 512
+```
+
+Run a tiny smoke only to verify the pipeline, not quality:
 
 ```bash
 python scripts/train_sft_v0_4.py \
@@ -228,25 +266,20 @@ python scripts/generate_instruct_v0_4.py \
   --instruction "Write a short story about a careful fox who learns to ask for help." \
   --max-new-tokens 160 \
   --temperature 0.8 \
-  --top-k 50
+  --top-k 50 \
+  --debug-top-k 10 \
+  --no-print-prompt
 ```
 
-Build the full 30k dataset:
+Training step guidance:
 
-```bash
-python scripts/build_sft_dataset.py \
-  --raw /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_30000.jsonl \
-  --scored /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/scored/sft_30000_scores.jsonl \
-  --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
-  --train-out data/xiaomi/processed/sft/train.jsonl \
-  --val-out data/xiaomi/processed/sft/val.jsonl \
-  --rejected-dir data/xiaomi/rejected \
-  --manifest data/xiaomi/manifests/sft_v0_4_manifest.json \
-  --val-ratio 0.02 \
-  --seed 1337
-```
+- Tiny smoke: 50-100 max steps only.
+- Around 1k accepted examples: 300-500 max steps.
+- 10k+ accepted examples: 1000-2000 max steps.
+- If overfitting or EOS bias appears, try `lr: 0.00005`.
+- Do not judge model quality from tiny SFT runs; use them only for alignment and pipeline checks.
 
-Train the 2000-step SFT run:
+Train a larger SFT run from the v0.3 base:
 
 ```bash
 python scripts/train_sft_v0_4.py \
@@ -265,7 +298,7 @@ python scripts/eval_sarych.py \
   --instruct-checkpoint runs/v0_4_30m_instruct_xiaomi/checkpoints/checkpoint_latest.pt
 ```
 
-The v0.4 SFT trainer uses output-only loss masking. Labels are `-100` for prompt and padding tokens, and token IDs only for assistant output plus `<|endoftext|>`.
+The v0.4 SFT trainer uses output-only next-token loss masking. Labels are `-100` for prompt content and padding. The final prompt token predicts the first assistant output token, then output tokens predict the next output token through `<|endoftext|>`.
 
 ## OOM Fallback
 
