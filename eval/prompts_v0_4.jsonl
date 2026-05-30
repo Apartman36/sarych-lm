@@ -1,0 +1,50 @@
+{"id":"eval_0001","category":"story_writing","instruction":"Write a short bedtime story about a small fox who learns to tell the truth.","input":""}
+{"id":"eval_0002","category":"story_writing","instruction":"Write a gentle story about a child who shares a red umbrella on a rainy day.","input":""}
+{"id":"eval_0003","category":"story_writing","instruction":"Write a simple story about a turtle who keeps trying after losing a race.","input":""}
+{"id":"eval_0004","category":"story_writing","instruction":"Write a short story about two friends who clean up a playground together.","input":""}
+{"id":"eval_0005","category":"story_writing","instruction":"Write a warm story about a shy moon who learns to shine.","input":""}
+{"id":"eval_0006","category":"story_writing","instruction":"Write a simple story about a little boat that helps a duck cross a pond.","input":""}
+{"id":"eval_0007","category":"story_continuation","instruction":"Continue this children's story in a kind and simple way.","input":"Maya found a tiny blue button under her bed. She wondered who had lost it."}
+{"id":"eval_0008","category":"story_continuation","instruction":"Continue this story with a happy ending.","input":"The small bear forgot where he had left his basket of berries."}
+{"id":"eval_0009","category":"story_continuation","instruction":"Continue this story for young children.","input":"A paper kite floated over the fence and landed near a quiet garden."}
+{"id":"eval_0010","category":"story_continuation","instruction":"Continue this simple story in three short paragraphs.","input":"Leo wanted to build the tallest block tower in the room."}
+{"id":"eval_0011","category":"story_continuation","instruction":"Continue this story and show the character learning patience.","input":"Nora planted a sunflower seed and checked the soil every morning."}
+{"id":"eval_0012","category":"story_continuation","instruction":"Continue this gentle story about friendship.","input":"Two little mice found one warm mitten on a snowy path."}
+{"id":"eval_0013","category":"explanation_for_children","instruction":"Explain to a young child why the sky can look orange at sunset.","input":""}
+{"id":"eval_0014","category":"explanation_for_children","instruction":"Explain why washing hands helps people stay healthy in simple words.","input":""}
+{"id":"eval_0015","category":"explanation_for_children","instruction":"Explain what a library is for a young child.","input":""}
+{"id":"eval_0016","category":"explanation_for_children","instruction":"Explain why plants need sunlight using simple English.","input":""}
+{"id":"eval_0017","category":"explanation_for_children","instruction":"Explain what it means to be honest in a child-friendly way.","input":""}
+{"id":"eval_0018","category":"explanation_for_children","instruction":"Explain why taking turns can make a game more fun.","input":""}
+{"id":"eval_0019","category":"simple_qa","instruction":"Answer the question in one short paragraph.","input":"Why do people sleep at night?"}
+{"id":"eval_0020","category":"simple_qa","instruction":"Answer the question simply and kindly.","input":"What should I do if I spill water on the floor?"}
+{"id":"eval_0021","category":"simple_qa","instruction":"Give a simple answer for a child.","input":"Why do we say thank you?"}
+{"id":"eval_0022","category":"simple_qa","instruction":"Answer with two or three simple sentences.","input":"What is a seed?"}
+{"id":"eval_0023","category":"simple_qa","instruction":"Answer the question without using hard words.","input":"Why does ice melt?"}
+{"id":"eval_0024","category":"simple_qa","instruction":"Answer this simple question clearly.","input":"What can I do when a friend feels sad?"}
+{"id":"eval_0025","category":"dialogue","instruction":"Write a short friendly dialogue between a parent and child about bedtime.","input":""}
+{"id":"eval_0026","category":"dialogue","instruction":"Write a simple dialogue between two children who decide to share crayons.","input":""}
+{"id":"eval_0027","category":"dialogue","instruction":"Write a polite dialogue between a child and a librarian.","input":""}
+{"id":"eval_0028","category":"dialogue","instruction":"Write a short dialogue where one friend says sorry and the other forgives them.","input":""}
+{"id":"eval_0029","category":"dialogue","instruction":"Write a simple dialogue about choosing a game everyone can play.","input":""}
+{"id":"eval_0030","category":"dialogue","instruction":"Write a short dialogue between a teacher and a child about trying again.","input":""}
+{"id":"eval_0031","category":"summarization","instruction":"Summarize this passage in one simple sentence.","input":"Tom planted a bean in a cup of soil. He watered it each day and put it near the window. After a week, a small green sprout appeared."}
+{"id":"eval_0032","category":"summarization","instruction":"Summarize this passage for a young child.","input":"A girl named Ami lost her hat at the park. Her brother helped her look under the bench, near the slide, and beside the tree. They found it in the sandbox."}
+{"id":"eval_0033","category":"summarization","instruction":"Give a short summary of this story.","input":"The little dog wanted the biggest stick. It was too heavy to carry, so he chose a smaller stick and happily ran home."}
+{"id":"eval_0034","category":"summarization","instruction":"Summarize the main lesson in this passage.","input":"Ben grabbed the toy truck first, but then he saw that Mia felt upset. He gave her a turn, and they both enjoyed playing."}
+{"id":"eval_0035","category":"summarization","instruction":"Summarize this in plain English.","input":"Rain fell all morning, so the picnic moved inside. The family put a blanket on the floor and ate sandwiches by the window."}
+{"id":"eval_0036","category":"summarization","instruction":"Write a one-sentence summary.","input":"Sara practiced tying her shoes many times. At first the laces slipped, but she kept trying until she made a neat bow."}
+{"id":"eval_0037","category":"simple_reasoning","instruction":"A child has two apples and gives one to a friend. How many apples are left? Explain simply.","input":""}
+{"id":"eval_0038","category":"simple_reasoning","instruction":"If a cup is full of water and you pour some out, is it still full? Answer simply.","input":""}
+{"id":"eval_0039","category":"simple_reasoning","instruction":"Lina has a red ball and a blue ball. She hides the red ball. Which ball can she still see?","input":""}
+{"id":"eval_0040","category":"simple_reasoning","instruction":"A cake is cut into four equal pieces. Two pieces are eaten. How many pieces are left?","input":""}
+{"id":"eval_0041","category":"simple_reasoning","instruction":"A toy car is under the table. Sam looks on top of the table. Will Sam see the toy car? Explain.","input":""}
+{"id":"eval_0042","category":"simple_reasoning","instruction":"If it is raining outside, should a child bring an umbrella or sunglasses? Explain simply.","input":""}
+{"id":"eval_0043","category":"structured_output","instruction":"Make a short list of three kind things a child can do at school.","input":""}
+{"id":"eval_0044","category":"structured_output","instruction":"Return three bedtime steps as a numbered list.","input":""}
+{"id":"eval_0045","category":"structured_output","instruction":"Write a tiny plan with the headings Morning, Afternoon, and Evening.","input":"The plan should be for a rainy day at home."}
+{"id":"eval_0046","category":"structured_output","instruction":"Give two columns named Animal and Sound using simple text.","input":"Use cat, dog, and cow."}
+{"id":"eval_0047","category":"structured_output","instruction":"Create a checklist of four things to pack for a school lunch.","input":""}
+{"id":"eval_0048","category":"structured_output","instruction":"Write a simple recipe format with Ingredients and Steps.","input":"The recipe is for a banana snack."}
+{"id":"eval_0049","category":"story_writing","instruction":"Write a short story about a bird who learns to ask for help.","input":""}
+{"id":"eval_0050","category":"simple_qa","instruction":"Answer this question in simple English.","input":"Why is it good to listen when someone is speaking?"}

@@ -5,6 +5,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .cache/
+.tmp*/
 .pip-cache/
 pip-wheel-metadata/
 .tox/
@@ -17,6 +18,8 @@ dist/
 
 runs/**
 !runs/.gitkeep
+artifacts/
+checkpoints/
 
 data/raw/*
 !data/raw/.gitkeep
@@ -24,8 +27,26 @@ data/processed/*
 !data/processed/.gitkeep
 data/tokenizers/*.json
 !data/tokenizers/.gitkeep
+data/xiaomi/raw/**/*.jsonl
+data/xiaomi/scored/**/*.jsonl
+data/xiaomi/processed/**/*.jsonl
+data/xiaomi/rejected/**/*.jsonl
+data/xiaomi/manifests/*.json
+!data/xiaomi/raw/.gitkeep
+!data/xiaomi/raw/sft/.gitkeep
+!data/xiaomi/scored/.gitkeep
+!data/xiaomi/processed/.gitkeep
+!data/xiaomi/processed/sft/.gitkeep
+!data/xiaomi/rejected/.gitkeep
+!data/xiaomi/manifests/.gitkeep
+logs/xiaomi/*
+!logs/xiaomi/.gitkeep
+eval/results/*.jsonl
+!eval/results/.gitkeep
 
 *.pt
 *.bin
 *.npy
 *.npz
+.env
+.env.*

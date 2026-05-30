@@ -6,7 +6,7 @@
 
 ## Stage
 
-v0.3 / v1-prep. This is a 30M-class TinyStories base training stage, not a polished v1 release.
+v0.3 / completed base model milestone. This is a 30M-class TinyStories base model, not a polished v1 release and not an instruction-tuned assistant.
 
 ## Architecture
 
@@ -25,7 +25,7 @@ v0.3 / v1-prep. This is a 30M-class TinyStories base training stage, not a polis
 - Dropout: 0.0
 - Bias: false
 
-The target parameter count is approximately 30M. With the default config, the current implementation reports 29,770,944 trainable parameters.
+The default config reports 29,770,944 trainable parameters.
 
 ## Tokenizer
 
@@ -84,6 +84,15 @@ Primary engineering evaluation:
 - Generated story-continuation samples from checkpoints
 - Checkpoint resume behavior
 - Throughput and CUDA memory metrics
+
+Completed run summary:
+
+- Training steps: 10,000
+- Tokens processed: 327,680,000
+- Best validation loss: 1.493360996246338
+- Final train loss: about 5.924356
+- Peak CUDA memory: about 3.53 GB
+- Generated text quality: coherent simple English story text
 
 No benchmark claims are made at this stage.
 

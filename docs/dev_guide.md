@@ -174,6 +174,99 @@ tail -n 20 runs/v0_3_30m_tinystories_base/train_log.jsonl
 
 Each JSONL record includes step, train loss, validation loss when evaluated, learning rate, tokens processed, throughput, device, dtype, parameter count, and CUDA memory allocation/reservation/peak fields.
 
+## v0.4 Xiaomi SFT Infrastructure
+
+SARYCH-LM does not generate Xiaomi data itself. Put manually generated examples outside this repository:
+
+```text
+C:\Users\hustlePC\PycharmProjects\sft-examples
+```
+
+Expected external layout:
+
+```text
+sft-examples/
+  seeds/
+  prompts/
+  raw/
+  scored/
+  rejected/
+  logs/
+  manifests/
+```
+
+Build a tiny 100-example dataset:
+
+```bash
+python scripts/build_sft_dataset.py \
+  --raw /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_100.jsonl \
+  --scored /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/scored/sft_100_scores.jsonl \
+  --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
+  --train-out data/xiaomi/processed/sft/train.jsonl \
+  --val-out data/xiaomi/processed/sft/val.jsonl \
+  --rejected-dir data/xiaomi/rejected \
+  --manifest data/xiaomi/manifests/sft_v0_4_manifest.json \
+  --val-ratio 0.05 \
+  --seed 1337
+```
+
+Run a 100-step SFT smoke:
+
+```bash
+python scripts/train_sft_v0_4.py \
+  --config configs/v0_4_30m_instruct_xiaomi.yaml \
+  --max-steps 100 \
+  --no-resume
+```
+
+Generate an instruct sample:
+
+```bash
+python scripts/generate_instruct_v0_4.py \
+  --checkpoint runs/v0_4_30m_instruct_xiaomi/checkpoints/checkpoint_latest.pt \
+  --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
+  --instruction "Write a short story about a careful fox who learns to ask for help." \
+  --max-new-tokens 160 \
+  --temperature 0.8 \
+  --top-k 50
+```
+
+Build the full 30k dataset:
+
+```bash
+python scripts/build_sft_dataset.py \
+  --raw /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/sft_30000.jsonl \
+  --scored /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/scored/sft_30000_scores.jsonl \
+  --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
+  --train-out data/xiaomi/processed/sft/train.jsonl \
+  --val-out data/xiaomi/processed/sft/val.jsonl \
+  --rejected-dir data/xiaomi/rejected \
+  --manifest data/xiaomi/manifests/sft_v0_4_manifest.json \
+  --val-ratio 0.02 \
+  --seed 1337
+```
+
+Train the 2000-step SFT run:
+
+```bash
+python scripts/train_sft_v0_4.py \
+  --config configs/v0_4_30m_instruct_xiaomi.yaml \
+  --max-steps 2000 \
+  --resume
+```
+
+Evaluate base vs instruct without Xiaomi judging:
+
+```bash
+python scripts/eval_sarych.py \
+  --prompts eval/prompts_v0_4.jsonl \
+  --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
+  --base-checkpoint runs/v0_3_30m_tinystories_base/checkpoints/checkpoint_latest.pt \
+  --instruct-checkpoint runs/v0_4_30m_instruct_xiaomi/checkpoints/checkpoint_latest.pt
+```
+
+The v0.4 SFT trainer uses output-only loss masking. Labels are `-100` for prompt and padding tokens, and token IDs only for assistant output plus `<|endoftext|>`.
+
 ## OOM Fallback
 
 The v0.3 default uses:
@@ -226,6 +319,9 @@ Do not commit:
 - `data/raw/*`
 - `data/processed/*`
 - generated tokenizer JSON files under `data/tokenizers/`
+- Xiaomi raw/scored/processed/rejected JSONL and manifests under `data/xiaomi/`
+- Xiaomi logs under `logs/xiaomi/`
+- evaluation result JSONL files under `eval/results/`
 - Python, pytest, mypy, ruff, and pip caches
 
 Keep:
