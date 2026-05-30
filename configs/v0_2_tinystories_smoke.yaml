@@ -1,0 +1,56 @@
+project_name: sarych-lm
+run_name: sarych-5m-tinystories-smoke
+seed: 1337
+
+model:
+  vocab_size: 4096
+  block_size: 256
+  n_layer: 6
+  n_head: 8
+  n_embd: 256
+  d_ff: 512
+  dropout: 0.0
+  bias: false
+  norm: rmsnorm
+  activation: swiglu
+  position_encoding: rope
+  tie_embeddings: true
+
+train:
+  device: auto
+  dtype: auto
+  compile: false
+  max_steps: 1000
+  micro_batch_size: 16
+  grad_accumulation_steps: 2
+  eval_batch_size: 16
+  eval_iters: 20
+  lr: 0.0003
+  min_lr: 0.00003
+  warmup_steps: 100
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  log_every: 20
+  eval_every: 100
+  sample_every: 250
+  checkpoint_every: 250
+  save_best: true
+  resume: true
+  strict_rng_restore: true
+  sample_prompt: Once upon a time
+
+dataset:
+  type: memmap_text
+  tokenizer_path: data/tokenizers/sarych_bpe_4096_sample.json
+  train_bin: data/processed/v0_2_sample/train.bin
+  val_bin: data/processed/v0_2_sample/val.bin
+  block_size: 256
+
+paths:
+  run_dir: runs/v0_2_tinystories_smoke
+  checkpoint_dir: runs/v0_2_tinystories_smoke/checkpoints
+  log_path: runs/v0_2_tinystories_smoke/train_log.jsonl
+  env_report_path: runs/v0_2_tinystories_smoke/env_report.txt
+  sample_dir: runs/v0_2_tinystories_smoke/samples

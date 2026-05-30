@@ -1,0 +1,55 @@
+project_name: sarych-lm
+run_name: sarych-5m-sanity
+seed: 1337
+
+model:
+  vocab_size: 1024
+  block_size: 128
+  n_layer: 4
+  n_head: 4
+  n_embd: 256
+  d_ff: 768
+  dropout: 0.0
+  bias: false
+  norm: rmsnorm
+  activation: swiglu
+  position_encoding: rope
+  tie_embeddings: true
+
+train:
+  device: auto
+  dtype: auto
+  compile: false
+  max_steps: 2000
+  micro_batch_size: 16
+  grad_accumulation_steps: 1
+  eval_batch_size: 16
+  eval_iters: 20
+  lr: 0.0003
+  min_lr: 0.00003
+  warmup_steps: 100
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  log_every: 20
+  eval_every: 100
+  sample_every: 250
+  checkpoint_every: 250
+  save_best: true
+  resume: true
+  strict_rng_restore: true
+
+synthetic_data:
+  train_tokens: 200000
+  val_tokens: 20000
+  pattern_mode: mixed
+  vocab_size: 1024
+  block_size: 128
+
+paths:
+  run_dir: runs/v0_1_synthetic_sanity
+  checkpoint_dir: runs/v0_1_synthetic_sanity/checkpoints
+  log_path: runs/v0_1_synthetic_sanity/train_log.jsonl
+  env_report_path: runs/v0_1_synthetic_sanity/env_report.txt
+  sample_dir: runs/v0_1_synthetic_sanity/samples
