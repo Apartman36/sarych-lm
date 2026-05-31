@@ -124,19 +124,34 @@ Category to task mapping:
 - summarization_rewrite -> summarization
 - emotional_support_kindness -> dialogue
 
+## Instruction-Lite Data Factory (v0.4.5)
+
+For shard-based teacher generation, validation, repairs, and merge, see:
+
+```text
+docs/instruction_lite_factory_v0_4.md
+```
+
+Quick entry:
+
+```bash
+python scripts/run_instruction_lite_factory.py prepare-shards --help
+```
+
 ## Validation
 
-Validate teacher output:
+Validate teacher output (single file or post-factory merge):
 
 ```bash
 python scripts/validate_instruction_lite_sft.py \
   --input /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/instruction_lite_v0_4.jsonl \
   --accepted /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/processed/instruction_lite_v0_4_accepted.jsonl \
   --rejected /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/rejected/instruction_lite_v0_4_rejected.jsonl \
-  --manifest /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/instruction_lite_v0_4_manifest.json
+  --manifest /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/instruction_lite_v0_4_manifest.json \
+  --strictness standard
 ```
 
-The validator checks schema, language, allowed task type, empty fields, "As an AI", chatty openers, blocked adult/political/medical/legal/financial/code terms, URLs, markdown tables, loops, repeated sentences, weird nonwords, category length windows, exact duplicates, and simple near-duplicate output overlap within each category.
+The validator checks schema, language, allowed task type, empty fields, "As an AI", chatty openers, blocked adult/political/medical/legal/financial/code terms, URLs, markdown tables, loops, repeated sentences, weird nonwords, category length windows, exact duplicates, and near-duplicate output overlap (calibrated by category and `--strictness`).
 
 Category checks enforce identity helper terms, direct causal explanations, list markers or clear separators, required input for continuation/rewrite, safety redirection, and warm direct support.
 

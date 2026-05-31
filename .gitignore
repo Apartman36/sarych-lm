@@ -21,6 +21,7 @@ runs/**
 artifacts/
 checkpoints/
 sft-examples/
+data/**/factory/
 sarych/update/*.jsonl
 sarych/update/*.json
 

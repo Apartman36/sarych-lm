@@ -5,8 +5,15 @@ import json
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any
+
+
+class Strictness(str, Enum):
+    STRICT = "strict"
+    STANDARD = "standard"
+    LENIENT = "lenient"
 
 
 TASK_TYPE_BY_CATEGORY = {
@@ -46,18 +53,58 @@ BLOCKED_DOMAIN_TERMS = {
     "algorithm",
 }
 
-WORD_LIMITS = {
-    "identity_chat": (8, 50),
-    "simple_explanation": (15, 80),
-    "simple_list": (15, 90),
-    "simple_qa": (3, 40),
-    "simple_reasoning": (10, 80),
-    "story_request": (40, 160),
-    "story_continuation": (30, 140),
-    "safety_refusal": (10, 60),
-    "emotional_support_kindness": (10, 80),
-    "summarization_rewrite": (10, 80),
+# (min_words, max_words) per strictness tier
+WORD_LIMITS: dict[Strictness, dict[str, tuple[int, int]]] = {
+    Strictness.STRICT: {
+        "identity_chat": (8, 50),
+        "simple_explanation": (15, 80),
+        "simple_list": (15, 90),
+        "simple_qa": (3, 40),
+        "simple_reasoning": (10, 80),
+        "story_request": (40, 160),
+        "story_continuation": (30, 140),
+        "safety_refusal": (10, 60),
+        "emotional_support_kindness": (10, 80),
+        "summarization_rewrite": (10, 80),
+    },
+    Strictness.STANDARD: {
+        "identity_chat": (8, 55),
+        "simple_explanation": (12, 90),
+        "simple_list": (8, 90),
+        "simple_qa": (3, 45),
+        "simple_reasoning": (8, 85),
+        "story_request": (40, 160),
+        "story_continuation": (30, 140),
+        "safety_refusal": (10, 65),
+        "emotional_support_kindness": (8, 80),
+        "summarization_rewrite": (5, 80),
+    },
+    Strictness.LENIENT: {
+        "identity_chat": (6, 60),
+        "simple_explanation": (10, 100),
+        "simple_list": (6, 100),
+        "simple_qa": (2, 50),
+        "simple_reasoning": (6, 90),
+        "story_request": (35, 180),
+        "story_continuation": (25, 150),
+        "safety_refusal": (8, 70),
+        "emotional_support_kindness": (6, 90),
+        "summarization_rewrite": (4, 90),
+    },
 }
+
+NEAR_DUP_THRESHOLDS: dict[Strictness, dict[str, float]] = {
+    Strictness.STRICT: {"default": 0.82, "story_request": 0.82, "story_continuation": 0.82},
+    Strictness.STANDARD: {"default": 0.88, "story_request": 0.93, "story_continuation": 0.93},
+    Strictness.LENIENT: {"default": 0.95, "story_request": 0.97, "story_continuation": 0.97},
+}
+
+
+def parse_strictness(value: str) -> Strictness:
+    try:
+        return Strictness(value.lower())
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"strictness must be strict|standard|lenient, got {value!r}") from exc
 
 
 def _read_jsonl_with_errors(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -70,7 +117,14 @@ def _read_jsonl_with_errors(path: Path) -> tuple[list[dict[str, Any]], list[dict
             try:
                 value = json.loads(line)
             except json.JSONDecodeError as exc:
-                errors.append({"id": None, "reason": "invalid_json", "detail": f"line {line_number}: {exc.msg}", "record": line.rstrip("\n")})
+                errors.append(
+                    {
+                        "id": None,
+                        "reason": "invalid_json",
+                        "detail": f"line {line_number}: {exc.msg}",
+                        "record": line.rstrip("\n"),
+                    }
+                )
                 continue
             if not isinstance(value, dict):
                 errors.append({"id": None, "reason": "not_object", "detail": f"line {line_number}", "record": value})
@@ -109,13 +163,20 @@ def _has_as_ai(text: str) -> bool:
 
 def _has_chatty_opener(text: str, category: str) -> bool:
     return category not in {"identity_chat", "emotional_support_kindness"} and bool(
-        re.match(r"^\s*(sure!?|of course!?)\b", text.lower())
+        re.match(r"^\s*(sure!?|of course!?|certainly!?)\b", text.lower())
     )
 
 
-def _has_blocked_domain_terms(*parts: str) -> bool:
+def _has_blocked_domain_terms(*parts: str, category: str = "") -> bool:
     text = " ".join(parts).lower()
-    return any(re.search(rf"\b{re.escape(term)}\b", text) for term in BLOCKED_DOMAIN_TERMS)
+    for term in BLOCKED_DOMAIN_TERMS:
+        if re.search(rf"\b{re.escape(term)}\b", text):
+            return True
+    # Safe medicine refusals may mention medicine without being adult-domain content.
+    if category == "safety_refusal" and re.search(r"\bmedicine\b", text):
+        if _safety_ok(parts[-1] if parts else ""):
+            return False
+    return False
 
 
 def _has_url(text: str) -> bool:
@@ -165,11 +226,30 @@ def _has_list_format(text: str) -> bool:
     return False
 
 
+def _list_item_count(text: str) -> int:
+    markers = re.findall(r"(?m)^\s*(?:[-*]|\d+[.)])\s+", text)
+    if len(markers) >= 2:
+        return len(markers)
+    parts = [part.strip() for part in re.split(r"[;\n]", text) if part.strip()]
+    if len(parts) >= 2:
+        return len(parts)
+    if text.count(",") >= 2:
+        return text.count(",") + 1
+    return 0
+
+
 def _identity_ok(text: str) -> bool:
     lowered = text.lower()
-    return bool(re.search(r"\b(i am|i'm|my name is|i can|i do not|i don't)\b", lowered)) and any(
-        term in lowered for term in ("sarych", "helper", "computer", "help", "answer")
+    has_persona = bool(
+        re.search(r"\b(i\b|i'm|i am|my name|my |me |myself)\b", lowered)
+        or "sarych" in lowered
     )
+    has_helper = any(
+        term in lowered
+        for term in ("sarych", "helper", "help", "friend", "computer", "answer", "name", "here for")
+    )
+    legacy = bool(re.search(r"\b(i am|i'm|my name is|i can|i do not|i don't)\b", lowered))
+    return (has_persona and has_helper) or legacy
 
 
 def _causal_explanation_ok(text: str) -> bool:
@@ -177,26 +257,37 @@ def _causal_explanation_ok(text: str) -> bool:
     if not first_sentence:
         return False
     first = first_sentence[0]
-    causal = ("because", "so", "helps", "need", "needs", "means", "makes")
+    causal = ("because", "so", "helps", "help", "need", "needs", "means", "makes", "turns", "lets", "keeps")
     return any(word in first for word in causal) and not _starts_with_story(first)
 
 
 def _reasoning_ok(text: str) -> bool:
     lowered = text.lower()
-    return any(term in lowered for term in ("so", "because", "left", "bigger", "yes", "no", "first", "then"))
+    if any(term in lowered for term in ("so", "because", "left", "bigger", "yes", "no", "first", "then")):
+        return True
+    return any(term in lowered for term in ("keeps", "warm", "cold", "wet", "dry", "need", "helps", "makes", "wear"))
 
 
 def _safety_ok(text: str) -> bool:
     lowered = text.lower()
-    return bool(re.search(r"\b(can't|cannot|do not|don't|not safe|ask)\b", lowered)) and any(
-        term in lowered for term in ("grown-up", "grown up", "trusted", "adult", "safer", "safe")
+    refusal = bool(re.search(r"\b(can't|cannot|do not|don't|not safe|should not|shouldn't|cannot help)\b", lowered))
+    redirect = any(
+        term in lowered
+        for term in ("grown-up", "grown up", "trusted", "adult", "safer", "safe", "grownup", "parent", "caregiver")
     )
+    return refusal and redirect
 
 
 def _support_ok(text: str) -> bool:
     lowered = text.lower()
-    warm = any(term in lowered for term in ("sorry", "sad", "breath", "trusted", "kind", "feel", "friend"))
-    return warm and not _starts_with_story(text)
+    warm = any(
+        term in lowered
+        for term in ("sorry", "sad", "breath", "trusted", "kind", "feel", "friend", "okay", "ok", "cry", "hug", "normal")
+    )
+    action = any(
+        term in lowered for term in ("breath", "talk", "tell", "ask", "try", "help", "walk", "slow", "share", "rest")
+    )
+    return warm and (action or "okay" in lowered or "ok" in lowered) and not _starts_with_story(text)
 
 
 def _ngram_set(text: str, width: int = 5) -> set[tuple[str, ...]]:
@@ -204,15 +295,43 @@ def _ngram_set(text: str, width: int = 5) -> set[tuple[str, ...]]:
     return {tuple(words[index : index + width]) for index in range(max(0, len(words) - width + 1))}
 
 
-def _near_duplicate(text: str, previous: list[set[tuple[str, ...]]]) -> bool:
+def _near_duplicate_overlap(text: str, previous: list[set[tuple[str, ...]]]) -> float:
     grams = _ngram_set(text)
     if len(grams) < 4:
-        return False
+        return 0.0
+    best = 0.0
     for seen in previous:
         union = grams | seen
-        if union and len(grams & seen) / len(union) >= 0.82:
-            return True
-    return False
+        if union:
+            best = max(best, len(grams & seen) / len(union))
+    return best
+
+
+def _near_duplicate(text: str, previous: list[set[tuple[str, ...]]], threshold: float) -> bool:
+    return _near_duplicate_overlap(text, previous) >= threshold
+
+
+def _length_ok(
+    category: str,
+    output: str,
+    *,
+    strictness: Strictness,
+) -> tuple[bool, str | None]:
+    minimum, maximum = WORD_LIMITS[strictness][category]
+    count = _word_count(output)
+    if count > maximum:
+        return False, f"{count} > {maximum}"
+    if count >= minimum:
+        return True, None
+    if category == "simple_list" and _has_list_format(output) and _list_item_count(output) >= 2:
+        return True, None
+    if category == "summarization_rewrite" and strictness != Strictness.STRICT and count >= 5:
+        return True, None
+    if category == "simple_qa" and count >= WORD_LIMITS[strictness]["simple_qa"][0]:
+        return True, None
+    if category == "identity_chat" and strictness == Strictness.LENIENT and count >= 6 and _identity_ok(output):
+        return True, None
+    return False, f"{count} < {minimum}"
 
 
 def _reject(row: Any, reason: str, detail: str | None = None) -> dict[str, Any]:
@@ -221,98 +340,123 @@ def _reject(row: Any, reason: str, detail: str | None = None) -> dict[str, Any]:
         "seed_id": row.get("seed_id") if isinstance(row, dict) else None,
         "source": row.get("source") if isinstance(row, dict) else None,
         "task_type": row.get("task_type") if isinstance(row, dict) else None,
-        "category": row.get("metadata", {}).get("category") if isinstance(row, dict) and isinstance(row.get("metadata"), dict) else None,
+        "category": row.get("metadata", {}).get("category")
+        if isinstance(row, dict) and isinstance(row.get("metadata"), dict)
+        else None,
         "reason": reason,
         "detail": detail,
         "record": row,
     }
 
 
-def validate_row(row: dict[str, Any], *, seen_exact: set[str], seen_category_ngrams: dict[str, list[set[tuple[str, ...]]]]) -> tuple[bool, str | None, str | None]:
+def validate_row(
+    row: dict[str, Any],
+    *,
+    seen_exact: set[str],
+    seen_category_ngrams: dict[str, list[set[tuple[str, ...]]]],
+    strictness: Strictness = Strictness.STANDARD,
+) -> tuple[bool, str | None, str | None, list[str]]:
+    warnings: list[str] = []
     missing = sorted(REQUIRED_FIELDS - set(row))
     if missing:
-        return False, "missing_fields", ",".join(missing)
+        return False, "missing_fields", ",".join(missing), warnings
     if row.get("language") != "en":
-        return False, "invalid_language", None
+        return False, "invalid_language", None, warnings
     if not isinstance(row.get("metadata"), dict):
-        return False, "invalid_metadata", None
+        return False, "invalid_metadata", None, warnings
     category = str(row["metadata"].get("category", ""))
     if category not in TASK_TYPE_BY_CATEGORY:
-        return False, "invalid_category", category
+        return False, "invalid_category", category, warnings
     if row.get("task_type") != TASK_TYPE_BY_CATEGORY[category]:
-        return False, "invalid_task_type", f"expected {TASK_TYPE_BY_CATEGORY[category]}"
+        return False, "invalid_task_type", f"expected {TASK_TYPE_BY_CATEGORY[category]}", warnings
     instruction = str(row.get("instruction", "")).strip()
     input_text = str(row.get("input", ""))
     output = str(row.get("output", "")).strip()
     if not instruction:
-        return False, "empty_instruction", None
+        return False, "empty_instruction", None, warnings
     if not output:
-        return False, "empty_output", None
+        return False, "empty_output", None, warnings
     if _has_as_ai(output):
-        return False, "as_ai_phrase", None
+        return False, "as_ai_phrase", None, warnings
     if _has_chatty_opener(output, category):
-        return False, "chatty_opener", None
-    if _has_blocked_domain_terms(instruction, input_text, output):
-        return False, "blocked_domain_term", None
+        return False, "chatty_opener", None, warnings
+    if _has_blocked_domain_terms(instruction, input_text, output, category=category):
+        return False, "blocked_domain_term", None, warnings
     if _has_url(output) or _has_url(instruction):
-        return False, "url", None
+        return False, "url", None, warnings
     if _has_markdown_table(output):
-        return False, "markdown_table", None
+        return False, "markdown_table", None, warnings
     if _has_repeated_sentence(output):
-        return False, "repeated_sentence", None
+        return False, "repeated_sentence", None, warnings
     if _has_loop(output):
-        return False, "obvious_loop", None
+        return False, "obvious_loop", None, warnings
     if _has_weird_nonword(output):
-        return False, "weird_nonword", None
-    minimum, maximum = WORD_LIMITS[category]
-    count = _word_count(output)
-    if count < minimum:
-        return False, "too_short", f"{count} < {minimum}"
-    if count > maximum:
-        return False, "too_long", f"{count} > {maximum}"
+        return False, "weird_nonword", None, warnings
+
+    length_ok, length_detail = _length_ok(category, output, strictness=strictness)
+    if not length_ok:
+        return False, "too_short" if length_detail and "<" in length_detail else "too_long", length_detail, warnings
+
     exact_key = re.sub(r"\s+", " ", instruction.lower()) + "\n" + re.sub(r"\s+", " ", output.lower())
     if exact_key in seen_exact:
-        return False, "duplicate_instruction_output", None
-    if _near_duplicate(output, seen_category_ngrams[category]):
-        return False, "near_duplicate_output", None
+        return False, "duplicate_instruction_output", None, warnings
+
+    dup_threshold = NEAR_DUP_THRESHOLDS[strictness].get(category, NEAR_DUP_THRESHOLDS[strictness]["default"])
+    overlap = _near_duplicate_overlap(output, seen_category_ngrams[category])
+    if overlap >= dup_threshold:
+        if strictness == Strictness.LENIENT:
+            warnings.append(f"near_duplicate_output:{overlap:.2f}")
+        else:
+            return False, "near_duplicate_output", f"overlap={overlap:.2f}", warnings
+    elif overlap >= NEAR_DUP_THRESHOLDS[Strictness.STRICT]["default"] and strictness == Strictness.STANDARD:
+        warnings.append(f"suspected_near_duplicate:{overlap:.2f}")
 
     if category == "identity_chat":
         if _starts_with_story(output):
-            return False, "story_collapse", None
+            return False, "story_collapse", None, warnings
         if not _identity_ok(output):
-            return False, "identity_fail", None
+            return False, "identity_fail", None, warnings
     elif category == "simple_explanation":
         if _starts_with_story(output):
-            return False, "story_collapse", None
+            return False, "story_collapse", None, warnings
         if not _causal_explanation_ok(output):
-            return False, "weak_explanation", None
+            if strictness == Strictness.LENIENT and len(_sentences(output)) >= 1:
+                warnings.append("weak_explanation")
+            else:
+                return False, "weak_explanation", None, warnings
     elif category == "simple_list":
         if _starts_with_story(output):
-            return False, "story_collapse", None
+            return False, "story_collapse", None, warnings
         if not _has_list_format(output):
-            return False, "list_format_fail", None
+            return False, "list_format_fail", None, warnings
     elif category == "story_continuation":
         if not str(row.get("input", "")).strip():
-            return False, "missing_input", None
+            return False, "missing_input", None, warnings
     elif category == "safety_refusal":
         if not _safety_ok(output):
-            return False, "unsafe_refusal", None
+            return False, "unsafe_refusal", None, warnings
     elif category == "emotional_support_kindness":
         if not _support_ok(output):
-            return False, "weak_support", None
+            if strictness == Strictness.LENIENT:
+                warnings.append("weak_support")
+            else:
+                return False, "weak_support", None, warnings
     elif category == "summarization_rewrite":
         if not str(row.get("input", "")).strip():
-            return False, "missing_input", None
+            return False, "missing_input", None, warnings
     elif category == "simple_reasoning":
         if _starts_with_story(output):
-            return False, "story_collapse", None
+            return False, "story_collapse", None, warnings
         if not _reasoning_ok(output):
-            return False, "weak_reasoning", None
+            if strictness == Strictness.LENIENT:
+                warnings.append("weak_reasoning")
+            else:
+                return False, "weak_reasoning", None, warnings
     elif category == "simple_qa":
         if _starts_with_story(output):
-            return False, "story_collapse", None
+            return False, "story_collapse", None, warnings
 
-    return True, None, None
+    return True, None, None, warnings
 
 
 def validate_instruction_lite_sft(
@@ -320,7 +464,12 @@ def validate_instruction_lite_sft(
     accepted_path: str | Path,
     rejected_path: str | Path,
     manifest_path: str | Path,
+    *,
+    strictness: Strictness | str = Strictness.STANDARD,
 ) -> dict[str, Any]:
+    if isinstance(strictness, str):
+        strictness = Strictness(strictness.lower())
+
     input_path = Path(input_path)
     accepted_path = Path(accepted_path)
     rejected_path = Path(rejected_path)
@@ -333,16 +482,27 @@ def validate_instruction_lite_sft(
     reason_counts: Counter[str] = Counter()
     source_counts: Counter[str] = Counter()
     category_counts: Counter[str] = Counter()
+    warning_counts: Counter[str] = Counter()
+    suspected_near_duplicate = 0
 
     for rejection in parse_rejections:
         reason_counts[str(rejection["reason"])] += 1
 
     for row in rows:
-        ok, reason, detail = validate_row(row, seen_exact=seen_exact, seen_category_ngrams=seen_category_ngrams)
+        ok, reason, detail, warnings = validate_row(
+            row,
+            seen_exact=seen_exact,
+            seen_category_ngrams=seen_category_ngrams,
+            strictness=strictness,
+        )
         if not ok:
             rejected.append(_reject(row, reason or "rejected", detail))
             reason_counts[reason or "rejected"] += 1
             continue
+        for warning in warnings:
+            warning_counts[warning.split(":")[0]] += 1
+            if warning.startswith("suspected_near_duplicate") or warning.startswith("near_duplicate_output"):
+                suspected_near_duplicate += 1
         instruction = str(row["instruction"]).strip()
         output = str(row["output"]).strip()
         category = str(row["metadata"]["category"])
@@ -355,7 +515,8 @@ def validate_instruction_lite_sft(
     _write_jsonl(accepted_path, accepted)
     _write_jsonl(rejected_path, rejected)
     manifest = {
-        "validator": "validate_instruction_lite_sft_v0_4",
+        "validator": "validate_instruction_lite_sft_v0_4_5",
+        "strictness": strictness.value,
         "input_path": str(input_path),
         "accepted_path": str(accepted_path),
         "rejected_path": str(rejected_path),
@@ -365,6 +526,8 @@ def validate_instruction_lite_sft(
         "category_counts": dict(sorted(category_counts.items())),
         "source_counts": dict(sorted(source_counts.items())),
         "rejection_reasons": dict(sorted(reason_counts.items())),
+        "warnings": dict(sorted(warning_counts.items())),
+        "suspected_near_duplicate_count": suspected_near_duplicate,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -378,12 +541,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--accepted", required=True)
     parser.add_argument("--rejected", required=True)
     parser.add_argument("--manifest", required=True)
+    parser.add_argument(
+        "--strictness",
+        type=parse_strictness,
+        default=Strictness.STANDARD,
+        help="strict|standard|lenient (default: standard)",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    manifest = validate_instruction_lite_sft(args.input, args.accepted, args.rejected, args.manifest)
+    manifest = validate_instruction_lite_sft(
+        args.input,
+        args.accepted,
+        args.rejected,
+        args.manifest,
+        strictness=args.strictness,
+    )
     print(json.dumps(manifest, indent=2, sort_keys=True))
 
 

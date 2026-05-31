@@ -341,6 +341,21 @@ Grid output is written under `artifacts/sft_grid_v0_4/` and must not be committe
 
 Use `docs/instruction_lite_v0_4.md` for the current instruction-lite pipeline. This workflow keeps teacher generation outside the repo and adds local-only tooling for seeds, validation, mixing, and fixed eval.
 
+### v0.4.5 shard factory
+
+Prefer the data factory over one-shot 1500-row teacher prompts. See `docs/instruction_lite_factory_v0_4.md`.
+
+```bash
+python scripts/run_instruction_lite_factory.py prepare-shards \
+  --seeds /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/seeds/instruction_lite_v0_4_seeds.jsonl \
+  --out-dir /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/factory/instruction_lite_v0_4 \
+  --shard-size 100 --seed 1337
+
+# After placing teacher outputs in shards/raw/
+python scripts/run_instruction_lite_factory.py validate-shards \
+  --factory-dir /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/factory/instruction_lite_v0_4
+```
+
 Create external-teacher seeds:
 
 ```bash
@@ -356,7 +371,8 @@ python scripts/validate_instruction_lite_sft.py \
   --input /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/instruction_lite_v0_4.jsonl \
   --accepted /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/processed/instruction_lite_v0_4_accepted.jsonl \
   --rejected /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/rejected/instruction_lite_v0_4_rejected.jsonl \
-  --manifest /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/instruction_lite_v0_4_manifest.json
+  --manifest /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/instruction_lite_v0_4_manifest.json \
+  --strictness standard
 ```
 
 Run the fixed eval on a selected checkpoint:
