@@ -32,6 +32,7 @@ data/tokenizers/*.json
 !data/tokenizers/.gitkeep
 data/xiaomi/raw/**/*.jsonl
 data/xiaomi/scored/**/*.jsonl
+data/xiaomi/seeds/**/*.jsonl
 data/xiaomi/processed/**/*.jsonl
 data/xiaomi/processed/**/*.json
 data/xiaomi/rejected/**/*.jsonl
@@ -40,6 +41,7 @@ data/xiaomi/manifests/**/*.json
 !data/xiaomi/raw/.gitkeep
 !data/xiaomi/raw/sft/.gitkeep
 !data/xiaomi/scored/.gitkeep
+!data/xiaomi/seeds/.gitkeep
 !data/xiaomi/processed/.gitkeep
 !data/xiaomi/processed/sft/.gitkeep
 !data/xiaomi/rejected/.gitkeep

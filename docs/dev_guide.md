@@ -337,6 +337,40 @@ python scripts/run_sft_experiment_grid.py \
 
 Grid output is written under `artifacts/sft_grid_v0_4/` and must not be committed.
 
+## v0.4.4 Instruction-Lite Tooling
+
+Use `docs/instruction_lite_v0_4.md` for the current instruction-lite pipeline. This workflow keeps teacher generation outside the repo and adds local-only tooling for seeds, validation, mixing, and fixed eval.
+
+Create external-teacher seeds:
+
+```bash
+python scripts/make_instruction_lite_seeds_v0_4.py \
+  --out data/xiaomi/seeds/instruction_lite_v0_4_seeds.jsonl \
+  --manifest data/xiaomi/manifests/instruction_lite_v0_4_seeds_manifest.json
+```
+
+Validate imported teacher rows:
+
+```bash
+python scripts/validate_instruction_lite_sft.py \
+  --input /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/raw/instruction_lite_v0_4.jsonl \
+  --accepted /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/processed/instruction_lite_v0_4_accepted.jsonl \
+  --rejected /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/rejected/instruction_lite_v0_4_rejected.jsonl \
+  --manifest /mnt/c/Users/hustlePC/PycharmProjects/sft-examples/manifests/instruction_lite_v0_4_manifest.json
+```
+
+Run the fixed eval on a selected checkpoint:
+
+```bash
+python scripts/eval_instruction_lite_v0_4.py \
+  --checkpoint runs/v0_4_30m_instruct_instruction_lite_lr5e6/checkpoints/checkpoint_latest.pt \
+  --tokenizer data/tokenizers/sarych_bpe_8192_tinystories.json \
+  --prompts evals/v0_4_instruction_lite_prompts.jsonl \
+  --out-dir artifacts/evals/v0_4/lr5e6_steps1000
+```
+
+Generated seeds, accepted/rejected teacher JSONL, mixed SFT JSONL, manifests, eval artifacts, runs, and checkpoints remain ignored.
+
 ## OOM Fallback
 
 The v0.3 default uses:

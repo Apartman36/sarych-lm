@@ -2,7 +2,7 @@
 
 ## Name
 
-`sarych-30m-instruct-xiaomi`
+`sarych-30m-instruct`
 
 ## Stage
 
@@ -49,7 +49,7 @@ Category mix:
 
 No code tasks are included in v0.4.
 
-The v0.4.3 experimentation pass adds a local-only lite replay recipe:
+The v0.4.3 experimentation pass added a local-only lite replay recipe:
 
 - Dolly-lite conversion from already downloaded Dolly raw JSONL with aggressive filtering.
 - TinyStories replay rows to preserve the base model's simple narrative behavior.
@@ -57,6 +57,16 @@ The v0.4.3 experimentation pass adds a local-only lite replay recipe:
 - Source-aware SFT filtering so replay rows are not rejected merely because they reuse story-writing or continuation instruction templates.
 
 This is an experiment recipe, not a committed dataset or final checkpoint.
+
+The v0.4.4 experimentation pass adds instruction-lite tooling:
+
+- fixed 40-prompt eval suite for identity, explanations, lists, QA, stories, reasoning, and safety/kindness
+- deterministic seed generation for a 1500-example external-teacher target
+- validator for teacher outputs with category-specific filters
+- replay + instruction-lite + small everyday mix builder
+- conservative LR configs at 1e-5, 5e-6, and 3e-6
+
+The target dataset is English-only, child-simple, and intentionally excludes code, broad professional assistant behavior, politics, adult, medical, legal, and financial tasks.
 
 ## Training Objective
 
@@ -80,13 +90,14 @@ Engineering validation of a small instruction-tuning pipeline for simple English
 - Production use
 - Safety-critical use
 - Code generation
+- Political, adult, medical, legal, or financial advice
 - Any claim that Xiaomi provides logits or direct model weights
 
 Xiaomi is a teacher/judge for synthetic data only.
 
 ## Evaluation
 
-Use `scripts/eval_sarych.py` with `eval/prompts_v0_4.jsonl` to generate base and instruct outputs for manual comparison. No Xiaomi judge is called in this pass.
+Use `scripts/eval_instruction_lite_v0_4.py` with `evals/v0_4_instruction_lite_prompts.jsonl` for the v0.4.4 fixed category suite. It produces generated outputs, a JSON summary, heuristic metrics, and a markdown report with blank manual-score fields. No Xiaomi judge is called in this pass.
 
 ## Limitations
 

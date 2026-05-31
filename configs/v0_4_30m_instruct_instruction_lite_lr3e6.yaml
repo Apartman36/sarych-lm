@@ -1,0 +1,57 @@
+project_name: sarych-lm
+run_name: sarych-30m-instruct-instruction-lite-lr3e6
+seed: 1337
+
+base:
+  checkpoint_path: runs/v0_3_30m_tinystories_base/checkpoints/checkpoint_latest.pt
+  tokenizer_path: data/tokenizers/sarych_bpe_8192_tinystories.json
+
+model:
+  vocab_size: 8192
+  block_size: 512
+  n_layer: 10
+  n_head: 8
+  n_embd: 448
+  d_ff: 1344
+  dropout: 0.0
+  bias: false
+  norm: rmsnorm
+  activation: swiglu
+  position_encoding: rope
+  tie_embeddings: true
+
+dataset:
+  train_jsonl: data/xiaomi/processed/sft/train.jsonl
+  val_jsonl: data/xiaomi/processed/sft/val.jsonl
+  max_seq_len: 512
+
+train:
+  device: auto
+  dtype: auto
+  compile: false
+  max_steps: 1000
+  micro_batch_size: 16
+  grad_accumulation_steps: 2
+  eval_batch_size: 16
+  eval_iters: 50
+  lr: 0.000003
+  min_lr: 0.0000003
+  warmup_steps: 50
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip: 1.0
+  log_every: 20
+  eval_every: 100
+  sample_every: 100
+  checkpoint_every: 100
+  save_best: true
+  resume: true
+  strict_rng_restore: true
+  sample_instruction: List three kind things a friend can do.
+
+paths:
+  run_dir: runs/v0_4_30m_instruct_instruction_lite_lr3e6
+  checkpoint_dir: runs/v0_4_30m_instruct_instruction_lite_lr3e6/checkpoints
+  log_path: runs/v0_4_30m_instruct_instruction_lite_lr3e6/train_log.jsonl
+  sample_dir: runs/v0_4_30m_instruct_instruction_lite_lr3e6/samples

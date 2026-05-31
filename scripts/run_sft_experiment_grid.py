@@ -41,7 +41,8 @@ def _load_prompts(prompts_file: str | Path | None) -> list[str]:
         if not line:
             continue
         if line.startswith("{"):
-            prompts.append(str(json.loads(line)["instruction"]))
+            row = json.loads(line)
+            prompts.append(str(row.get("prompt", row.get("instruction", ""))))
         else:
             prompts.append(line)
     return prompts
@@ -251,8 +252,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     configs = args.configs or [
-        "configs/v0_4_30m_instruct_lite_lr2e5.yaml",
-        "configs/v0_4_30m_instruct_lite_lr1e5.yaml",
+        "configs/v0_4_30m_instruct_instruction_lite_lr1e5.yaml",
+        "configs/v0_4_30m_instruct_instruction_lite_lr5e6.yaml",
+        "configs/v0_4_30m_instruct_instruction_lite_lr3e6.yaml",
     ]
     result = run_sft_experiment_grid(
         configs=configs,

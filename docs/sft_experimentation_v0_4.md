@@ -14,6 +14,20 @@ TinyStories replay is mixed into SFT to protect the base model's narrative abili
 
 The build manifest now includes `accepted_by_source`, `rejected_by_source`, `accepted_by_task_type`, `rejected_by_task_type`, and `rejected_reason_by_source`. For replay debugging, check that `accepted_by_source.tinystories_replay` is nonzero and close to the replay cap after malformed, too-long, and output-duplicate rows are removed.
 
+## v0.4.4 Instruction-Lite Shift
+
+Replay-heavy v0.4.3 runs recovered TinyStories-like story fluency but did not reliably teach assistant behavior. The next experiment uses instruction-lite synthetic data instead of adding more steps on the same replay-heavy mix.
+
+Use `docs/instruction_lite_v0_4.md` for the v0.4.4 workflow:
+
+- fixed 40-prompt eval suite under `evals/v0_4_instruction_lite_prompts.jsonl`
+- deterministic 1500 seed prompts for an external teacher
+- teacher-output validation and rejection manifests
+- replay + instruction-lite + small everyday mix recipe
+- three conservative LR configs for 1000-step experiments
+
+Dolly/OASST/Alpaca/UltraChat remain out of this recipe because the target model is intentionally narrow: English-only, child-simple, no code, no broad professional assistant behavior, and no politics/adult/medical/legal/financial tasks.
+
 ## Commands
 
 Convert Dolly-lite from the already downloaded local raw file:
@@ -74,9 +88,11 @@ Run the short grid:
 
 ```bash
 python scripts/run_sft_experiment_grid.py \
-  --config configs/v0_4_30m_instruct_lite_replay_lr1e5.yaml \
-  --config configs/v0_4_30m_instruct_lite_replay_lr5e6.yaml \
-  --steps 100 200 300
+  --config configs/v0_4_30m_instruct_instruction_lite_lr1e5.yaml \
+  --config configs/v0_4_30m_instruct_instruction_lite_lr5e6.yaml \
+  --config configs/v0_4_30m_instruct_instruction_lite_lr3e6.yaml \
+  --steps 500 1000 \
+  --prompts-file evals/v0_4_instruction_lite_prompts.jsonl
 ```
 
 Use `--run-dir` when launching a single short experiment to keep probes isolated:
