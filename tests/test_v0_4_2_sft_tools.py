@@ -296,6 +296,64 @@ def test_source_aware_manifest_reports_accepts_rejects_and_reasons(tmp_path):
     assert manifest["rejected_reason_by_source"] == {"databricks_dolly_15k_lite": {"duplicates": 1}}
 
 
+def test_trusted_source_policy_accepts_factory_validated_short_rows_but_keeps_hard_rejections(tmp_path):
+    _tiny_tokenizer(tmp_path)
+    trusted = "xiaomi_instruction_lite_v0_4"
+    rows = [
+        _sft_row("qa_1", trusted, "simple_qa", "What is rain for a child?", "Rain is water from clouds."),
+        _sft_row("list_1", trusted, "structured_output", "List two gentle bedtime steps.", "1. Brush teeth.\n2. Read a story."),
+        _sft_row("sum_1", trusted, "summarization", "Make this idea shorter for a child.", "A seed can grow into a plant."),
+        _sft_row(
+            "safe_1",
+            trusted,
+            "dialogue",
+            "A child asks if they should take medicine from a shelf.",
+            "Do not take it alone. Ask a trusted grown-up first.",
+        ),
+        _sft_row("qa_2", trusted, "simple_qa", "What is rain for a child?", "Rain is water from clouds."),
+        _sft_row("long_1", trusted, "simple_qa", "Say friendly words about stars.", " ".join(["friendly"] * 300)),
+    ]
+    rows[1]["metadata"]["category"] = "simple_list"
+    rows[2]["metadata"]["category"] = "summarization_rewrite"
+    rows[3]["metadata"]["category"] = "safety_refusal"
+    malformed = _sft_row("bad_1", trusted, "simple_qa", "Broken row.", "Missing output.")
+    malformed.pop("output")
+    raw_path = tmp_path / "trusted.jsonl"
+    _write_jsonl(raw_path, rows + [malformed])
+
+    manifest = build_sft_splits(
+        raw_path=raw_path,
+        scored_path=None,
+        tokenizer_path=tmp_path / "tokenizer.json",
+        train_path=tmp_path / "train.jsonl",
+        val_path=tmp_path / "val.jsonl",
+        rejected_dir=tmp_path / "rejected",
+        val_ratio=0.0,
+        seed=123,
+        max_seq_len=160,
+        trusted_source_prefixes=[trusted],
+    )
+
+    assert manifest["accepted_rows"] == 4
+    assert manifest["rejected_counts"]["duplicates"] == 1
+    assert manifest["rejected_counts"]["malformed"] == 1
+    assert manifest["rejected_counts"]["too_long"] == 1
+    assert manifest["accepted_by_category"] == {
+        "safety_refusal": 1,
+        "simple_list": 1,
+        "summarization_rewrite": 1,
+        "UNKNOWN": 1,
+    }
+    assert manifest["rejected_by_category"]["UNKNOWN"] == 3
+    assert manifest["trusted_source_policy_active"] is True
+    assert manifest["trusted_source_prefixes"] == [trusted]
+    assert manifest["trusted_source_rows_seen"] == 7
+    assert manifest["trusted_source_rows_accepted"] == 4
+    assert manifest["trusted_source_rows_rejected"] == 3
+    assert manifest["trusted_source_rejection_reasons"] == {"duplicates": 1, "malformed": 1, "too_long": 1}
+    assert manifest["rejection_reasons_by_source"][trusted] == {"duplicates": 1, "malformed": 1, "too_long": 1}
+
+
 def test_tinystories_replay_generator_manifest_and_modes(tmp_path):
     source = tmp_path / "TinyStories-valid.txt"
     output = tmp_path / "replay" / "tinystories_replay_sft_v0_4.jsonl"

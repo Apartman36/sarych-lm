@@ -28,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keep-replay-duplicates", action="store_true")
     parser.add_argument("--replay-dedup-mode", choices=["output_hash", "none"], default="output_hash")
     parser.add_argument("--disable-replay-low-diversity-filter", action="store_true")
+    parser.add_argument("--trusted-source-prefix", action="append", default=[], help="Source prefix that has passed upstream factory validation. May be provided multiple times.")
     return parser.parse_args()
 
 
@@ -48,6 +49,7 @@ def main() -> None:
         keep_replay_duplicates=args.keep_replay_duplicates,
         replay_dedup_mode=args.replay_dedup_mode,
         disable_replay_low_diversity_filter=args.disable_replay_low_diversity_filter,
+        trusted_source_prefixes=args.trusted_source_prefix,
     )
     print(json.dumps(manifest, indent=2, sort_keys=True))
 

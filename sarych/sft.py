@@ -268,6 +268,15 @@ def _dedup_key(row: dict[str, Any]) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def _row_category(row: dict[str, Any]) -> str:
+    metadata = row.get("metadata")
+    if isinstance(metadata, dict):
+        category = metadata.get("category")
+        if isinstance(category, str) and category.strip():
+            return category.strip()
+    return "UNKNOWN"
+
+
 def _output_dedup_key(row: dict[str, Any]) -> str:
     normalized = _normalize_for_dedup(str(row["output"]))
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -384,6 +393,7 @@ def build_sft_splits(
     keep_replay_duplicates: bool = False,
     replay_dedup_mode: str = "output_hash",
     disable_replay_low_diversity_filter: bool = False,
+    trusted_source_prefixes: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     if replay_dedup_mode not in {"output_hash", "none"}:
         raise ValueError(f"Unsupported replay_dedup_mode: {replay_dedup_mode}")
@@ -398,40 +408,64 @@ def build_sft_splits(
     tokenizer = SarychBPETokenizer.from_file(tokenizer_path)
     rows, parse_errors = _read_jsonl(raw_path)
     scores_by_example_id = _read_scores(scored_path)
+    trusted_source_prefixes = list(trusted_source_prefixes or [])
 
     rejected: dict[str, list[dict[str, Any]]] = {key: [] for key in REJECT_FILES}
     accepted: list[dict[str, Any]] = []
     seen_hashes: set[str] = set()
+    seen_trusted_ids: set[str] = set()
     seen_replay_output_hashes: set[str] = set()
     seen_instruction_sets: list[set[str]] = []
     accepted_by_source: Counter[str] = Counter()
     rejected_by_source: Counter[str] = Counter()
     accepted_by_task_type: Counter[str] = Counter()
     rejected_by_task_type: Counter[str] = Counter()
+    accepted_by_category: Counter[str] = Counter()
+    rejected_by_category: Counter[str] = Counter()
     rejected_reason_by_source: dict[str, Counter[str]] = defaultdict(Counter)
+    rejected_reason_by_task_type: dict[str, Counter[str]] = defaultdict(Counter)
+    rejected_reason_by_category: dict[str, Counter[str]] = defaultdict(Counter)
+    trusted_source_rows_seen = 0
+    trusted_source_rows_accepted = 0
+    trusted_source_rejection_reasons: Counter[str] = Counter()
+
+    def is_trusted_source(row: dict[str, Any]) -> bool:
+        source = str(row.get("source", ""))
+        return any(source.startswith(prefix) for prefix in trusted_source_prefixes)
 
     def reject(category: str, row: Any, reason: str, detail: str | None = None) -> None:
         rejected[category].append(_reject_record(row, reason, detail))
         if isinstance(row, dict):
             source = str(row.get("source", "UNKNOWN"))
             task_type = str(row.get("task_type", "UNKNOWN"))
+            row_category = _row_category(row)
         else:
             source = "UNKNOWN"
             task_type = "UNKNOWN"
+            row_category = "UNKNOWN"
         rejected_by_source[source] += 1
         rejected_by_task_type[task_type] += 1
+        rejected_by_category[row_category] += 1
         rejected_reason_by_source[source][category] += 1
+        rejected_reason_by_task_type[task_type][category] += 1
+        rejected_reason_by_category[row_category][category] += 1
+        if isinstance(row, dict) and is_trusted_source(row):
+            trusted_source_rejection_reasons[category] += 1
 
     for raw_line, detail in parse_errors:
         reject("malformed", raw_line, "json_decode_error", detail)
 
     for row in rows:
+        is_trusted = isinstance(row, dict) and is_trusted_source(row)
+        if is_trusted:
+            trusted_source_rows_seen += 1
         structural = validate_raw_sft_row(row)
         if not structural.ok:
             reject("malformed", row, structural.reason or "malformed", structural.detail)
             continue
 
         is_replay = str(row["source"]).startswith(replay_source_prefix)
+        is_trusted = is_trusted_source(row)
 
         try:
             build_sft_features(row, tokenizer, max_seq_len=max_seq_len)
@@ -439,14 +473,15 @@ def build_sft_splits(
             reject("too_long", row, "too_long", str(exc))
             continue
 
-        content = _passes_content_filters(
-            row,
-            is_replay=is_replay,
-            disable_replay_low_diversity_filter=disable_replay_low_diversity_filter,
-        )
-        if not content.ok:
-            reject("filtered", row, content.reason or "filtered", content.detail)
-            continue
+        if not is_trusted:
+            content = _passes_content_filters(
+                row,
+                is_replay=is_replay,
+                disable_replay_low_diversity_filter=disable_replay_low_diversity_filter,
+            )
+            if not content.ok:
+                reject("filtered", row, content.reason or "filtered", content.detail)
+                continue
 
         if is_replay and keep_replay_duplicates:
             if replay_dedup_mode == "output_hash":
@@ -457,7 +492,9 @@ def build_sft_splits(
                 seen_replay_output_hashes.add(replay_key)
         else:
             key = _dedup_key(row)
-            if key in seen_hashes or _is_near_duplicate_instruction(row, seen_instruction_sets):
+            duplicate_id = is_trusted and str(row["id"]) in seen_trusted_ids
+            near_duplicate = (not is_trusted) and _is_near_duplicate_instruction(row, seen_instruction_sets)
+            if key in seen_hashes or duplicate_id or near_duplicate:
                 reject("duplicates", row, "duplicate")
                 continue
 
@@ -468,9 +505,15 @@ def build_sft_splits(
 
         if not (is_replay and keep_replay_duplicates):
             seen_hashes.add(key)
-            seen_instruction_sets.append(_instruction_tokens(row))
+            if is_trusted:
+                seen_trusted_ids.add(str(row["id"]))
+            else:
+                seen_instruction_sets.append(_instruction_tokens(row))
         accepted_by_source[str(row["source"])] += 1
         accepted_by_task_type[str(row["task_type"])] += 1
+        accepted_by_category[_row_category(row)] += 1
+        if is_trusted:
+            trusted_source_rows_accepted += 1
         accepted.append(row)
 
     train_rows, val_rows = _split_stratified(accepted, val_ratio=val_ratio, seed=seed)
@@ -496,9 +539,26 @@ def build_sft_splits(
         "rejected_by_source": dict(sorted(rejected_by_source.items())),
         "accepted_by_task_type": dict(sorted(accepted_by_task_type.items())),
         "rejected_by_task_type": dict(sorted(rejected_by_task_type.items())),
+        "accepted_by_category": dict(sorted(accepted_by_category.items())),
+        "rejected_by_category": dict(sorted(rejected_by_category.items())),
         "rejected_reason_by_source": {
             source: dict(sorted(counts.items())) for source, counts in sorted(rejected_reason_by_source.items())
         },
+        "rejection_reasons_by_source": {
+            source: dict(sorted(counts.items())) for source, counts in sorted(rejected_reason_by_source.items())
+        },
+        "rejection_reasons_by_task_type": {
+            task_type: dict(sorted(counts.items())) for task_type, counts in sorted(rejected_reason_by_task_type.items())
+        },
+        "rejection_reasons_by_category": {
+            category: dict(sorted(counts.items())) for category, counts in sorted(rejected_reason_by_category.items())
+        },
+        "trusted_source_policy_active": bool(trusted_source_prefixes),
+        "trusted_source_prefixes": trusted_source_prefixes,
+        "trusted_source_rows_seen": trusted_source_rows_seen,
+        "trusted_source_rows_accepted": trusted_source_rows_accepted,
+        "trusted_source_rows_rejected": trusted_source_rows_seen - trusted_source_rows_accepted,
+        "trusted_source_rejection_reasons": dict(sorted(trusted_source_rejection_reasons.items())),
         "train_count": len(train_rows),
         "val_count": len(val_rows),
         "category_distribution": _category_distribution(train_rows, val_rows),
